@@ -625,8 +625,26 @@
         }
         window.toggleFilterGroup = toggleFilterGroup;
 
+        // Keep the visible Bulk Exclusions tag list and the normalized backend
+        // lookup ledger synchronized. Without this, clearing/removing a sidebar tag
+        // can leave its hidden matchKey active, so KPI diagnostics do not refresh.
+        function syncBulkExclusionLedgerFromVisibleRules() {
+            state.bulkExclusionKeys = new Set();
+            state.bulkLocations.forEach(loc => {
+                const raw = String(loc || '').trim();
+                // Wildcards are evaluated by isBulkLocator() against bulkLocations.
+                // Only exact rules belong in the normalized O(1) ledger.
+                if (raw && !raw.includes('*')) {
+                    const key = toMatchKey(raw);
+                    if (key) state.bulkExclusionKeys.add(key);
+                }
+            });
+        }
+
         function clearBulkLocations() {
             state.bulkLocations = [];
+            syncBulkExclusionLedgerFromVisibleRules();
+            state.currentPage = 1;
             processDataPipeline();
             render();
         }
@@ -2146,6 +2164,8 @@
             const value = input.value.trim().toUpperCase();
             if (value && !state.bulkLocations.includes(value)) {
                 state.bulkLocations.push(value);
+                syncBulkExclusionLedgerFromVisibleRules();
+                state.currentPage = 1;
                 input.value = '';
                 processDataPipeline();
                 render();
@@ -2155,6 +2175,8 @@
 
         function removeBulkLocator(loc) {
             state.bulkLocations = state.bulkLocations.filter(b => b !== loc);
+            syncBulkExclusionLedgerFromVisibleRules();
+            state.currentPage = 1;
             processDataPipeline();
             render();
         }
