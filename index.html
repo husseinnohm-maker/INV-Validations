@@ -63,21 +63,14 @@
         ];
 
         // ── MULTI-HEADER ALIAS ARRAYS ─────────────────────────────────────────────
-        // Used to discover Location and Storage Type columns regardless of file layout.
         const LOC_COL_ALIASES   = ['location', 'locator', 'item locator', 'location code'];
         const STOR_COL_ALIASES  = ['storage', 'storage type', 'bins/shelves', 'bin shelves', 'storage_type'];
         const ORG_COL_ALIASES   = ['org code', 'org', 'warehouse org', 'orgcode', 'wh org',
                                    'organization', 'warehouse name', 'warehouse'];
         const ZONE_COL_ALIASES  = ['zone name', 'zone_name', 'zone'];
 
-        // ── ALPHANUMERIC MATCH KEY — strips all non-alphanumeric chars for cross-file
-        // matching. Dots/dashes in one file won't break matches against cleaner files.
-        // e.g. "AC03.01L01.A" → "AC0301L01A" matches "AC0301L01A" exactly.
-        // NOTE: only used INTERNALLY for lookups. Raw strings are always preserved
-        //       in the display layer (tables, exports, warnings).
         const toMatchKey = (val) => String(val || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
 
-        // Helper — find first header matching an alias array (case-insensitive)
         function findColByAliases(headers, aliases) {
             for (const alias of aliases) {
                 const found = headers.find(h => h && h.replace(/^﻿/, '').trim().toLowerCase() === alias);
@@ -90,7 +83,7 @@
             isInitialized: false,
             sohData: [],
             locData: [],
-            bulkExclusionKeys: new Set(), // matchKey-indexed exclusion ledger
+            bulkExclusionKeys: new Set(),
             loading: false,
             errorMsg: '',
             googleSheetUrl: '',
@@ -271,17 +264,11 @@
             return isNaN(num) ? 0 : num;
         }
 
-        // ── BULK LOCATOR CHECK ───────────────────────────────────────────────────────
-        // Uses the alphanumeric toMatchKey() to compare against the bulkExclusionKeys
-        // Set (O(1) lookup) so that "AC03.01L01.A" matches "AC0301L01A" seamlessly.
-        // Wildcard patterns entered manually in the sidebar still use the string array.
         function isBulkLocator(loc) {
             if (!loc) return false;
-            // First: check alphanumeric matchKey against the ledger set
             const locKey = toMatchKey(loc);
             if (state.bulkExclusionKeys && state.bulkExclusionKeys.has(locKey)) return true;
 
-            // Second: honour manually-entered wildcard rules from the sidebar UI
             const uLoc = String(loc).trim().toUpperCase();
             return state.bulkLocations.some(bulk => {
                 const uBulk = String(bulk).trim().toUpperCase();
@@ -293,7 +280,6 @@
                         .replace(/\*/g, '.*') + '$';
                     try { return new RegExp(regexStr).test(uLoc); } catch(e) { return false; }
                 }
-                // Exact match on the raw uppercase string for manually entered patterns
                 return uLoc === uBulk;
             });
         }
@@ -314,21 +300,14 @@
             return mapping;
         }
 
-        // ── STORAGE CATEGORY CLASSIFIER ─────────────────────────────────────────────
-        // Trims, normalises, and case-insensitively matches against the 5 whitelist
-        // categories (indices 0-4 of APPROVED_STORAGE_CLASSES). Anything that misses
-        // falls into 'Dummy Location Bucket' (index 5). This guarantees Dummy always
-        // sorts/renders last everywhere the SIX-TIER ORDER LOCK is applied.
         function determineStorageCategory(rawStorageType) {
             const stType = String(rawStorageType || '').trim();
             if (!stType) return 'Dummy Location Bucket';
 
-            // Match case-insensitively against first 5 whitelist entries only
             const whitelistCheck = ['Normal Physical Storage', 'Radio Shuttle', 'Bins', 'Shelves', 'POS'];
             for (const cat of whitelistCheck) {
                 if (stType.toLowerCase() === cat.toLowerCase()) return cat;
             }
-            // Unrecognised / empty / out-of-whitelist → Dummy Location Bucket
             return 'Dummy Location Bucket';
         }
 
@@ -340,7 +319,7 @@
             if (!loc) return 'Unspecified';
             const clean = String(loc).trim().toUpperCase();
             if (clean.startsWith('S')) return 'Radio Shuttle';
-            if (clean.includes('DZ') || clean.includes('DMG') || clean.includes('DUMMY')) return 'Dummy Location Bucket'; // SIX-TIER ORDER LOCK
+            if (clean.includes('DZ') || clean.includes('DMG') || clean.includes('DUMMY')) return 'Dummy Location Bucket';
             return 'Normal Physical Storage';
         }
 
@@ -371,15 +350,8 @@
             return { aisle, level };
         }
 
-        // ── BULK EXCLUSION REGISTRY BUILDER ─────────────────────────────────────────
-        // Scans location master with alias-based header detection (STOR_COL_ALIASES /
-        // LOC_COL_ALIASES). Locations that resolve to 'Dummy Location Bucket' have
-        // their toMatchKey() registered in state.bulkExclusionKeys (for fast O(1)
-        // lookup during processing) AND their raw display string pushed to
-        // state.bulkLocations (rendered as tags in the sidebar).
         function initializeBulkExclusions() {
             state.bulkLocations = [];
-            // Global matchKey-indexed exclusion ledger — used in processDataPipeline
             state.bulkExclusionKeys = new Set();
 
             const mapKey = (row, key) => {
@@ -387,24 +359,21 @@
                 return userHeader && row[userHeader] !== null && row[userHeader] !== undefined ? String(row[userHeader]).trim() : '';
             };
 
-            // matchKey → raw string lookup so we can register raw display strings
             const locMatchKeyToRaw = new Map();
 
             if (state.locData && state.locData.length > 0) {
                 const headers = Object.keys(state.locData[0]);
-                // ── Alias-based column discovery ──────────────────────────────────────
                 const storageKeyLoc = findColByAliases(headers, STOR_COL_ALIASES);
                 const locKeyLoc     = findColByAliases(headers, LOC_COL_ALIASES);
 
                 state.locData.forEach(locRow => {
-                    // Retrieve raw location string (preserve dots/dashes for display)
                     const locRaw = String(
                         locRow['Location'] || locRow['Locator'] ||
                         (locKeyLoc ? locRow[locKeyLoc] : '') || ''
                     ).trim();
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw); // alphanumeric backend key
+                    const locKey = toMatchKey(locRaw); 
                     locMatchKeyToRaw.set(locKey, locRaw);
 
                     const rawStorageVal = String(
@@ -413,7 +382,6 @@
                     ).trim();
                     const cat = determineStorageCategory(rawStorageVal);
 
-                    // Auto-register Dummy Location Bucket entries in the exclusion ledger
                     if (cat === 'Dummy Location Bucket') {
                         state.bulkExclusionKeys.add(locKey);
                         if (!state.bulkLocations.includes(locRaw)) {
@@ -423,7 +391,6 @@
                 });
             }
 
-            // Also scan SOH for locators not in master that look like dummies/tracking
             if (state.sohData && state.sohData.length > 0) {
                 state.sohData.forEach(row => {
                     const locRaw = mapKey(row, 'Locator') || 'UNKNOWN';
@@ -445,7 +412,6 @@
         function generateSampleData(rowCount = 15000) {
             const soh = [];
             const locs = [];
-            // Dynamic org codes for simulation — no hardcoded warehouse names
             const orgs = ['WH-A', 'WH-B'];
             const divisions = ['CGD', 'SDD'];
             const suppliers = ['Global Foods Inc', 'InterContinental Shipping', 'Amana Logistics', 'Fine Foods Supply'];
@@ -487,7 +453,7 @@
 
             const dupLPN = 'LPN-DUPLICATE-TRK';
             soh.push(createRow('A10.01L01.A', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' }));
-            soh.push(createRow('A25.01L02.A', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' }));
+            soh.push(createRow('DZ.00.00', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' })); // Ghost in dummy location to test logic
 
             for (let i = soh.length; i < rowCount; i++) {
                 const loc = locators[Math.floor(Math.random() * locators.length)];
@@ -505,13 +471,11 @@
             return { soh, locs };
         }
 
-        // ── createRow: no hardcoded org — org is always supplied via overrides or
-        //    discovered dynamically at runtime from uploaded files.
         function createRow(locator, overrides = {}) {
             const baseDate = new Date();
             baseDate.setDate(baseDate.getDate() + Math.floor(Math.random() * 240));
             const row = {
-                'Org Code': 'SIM-WH',  // Simulation placeholder — never replaces real uploads
+                'Org Code': 'SIM-WH',
                 'Division': 'SDD',
                 'Supplier': 'Generic Supp',
                 'Item Category': 'General',
@@ -625,15 +589,10 @@
         }
         window.toggleFilterGroup = toggleFilterGroup;
 
-        // Keep the visible Bulk Exclusions tag list and the normalized backend
-        // lookup ledger synchronized. Without this, clearing/removing a sidebar tag
-        // can leave its hidden matchKey active, so KPI diagnostics do not refresh.
         function syncBulkExclusionLedgerFromVisibleRules() {
             state.bulkExclusionKeys = new Set();
             state.bulkLocations.forEach(loc => {
                 const raw = String(loc || '').trim();
-                // Wildcards are evaluated by isBulkLocator() against bulkLocations.
-                // Only exact rules belong in the normalized O(1) ledger.
                 if (raw && !raw.includes('*')) {
                     const key = toMatchKey(raw);
                     if (key) state.bulkExclusionKeys.add(key);
@@ -753,6 +712,59 @@
         }
         window.exportFilteredGrid = exportFilteredGrid;
 
+        // ── EXPORT ALL ISSUES TO MULTI-SHEET EXCEL ────────────────────────────────────
+        function exportAllIssuesToExcel() {
+            const data = getGloballyFilteredData();
+            
+            // Filter out 'Matching' and 'Excluded' (if any are still hiding in data)
+            const issues = data.filter(row => 
+                row._action !== "Matching — No Action Required" && 
+                row._action !== "Bulk Location — Excluded"
+            );
+
+            if (issues.length === 0) {
+                alert("No issues found to export under current org/division filters.");
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+            const groups = {};
+            
+            issues.forEach(row => {
+                const act = row._action;
+                if (!groups[act]) groups[act] = [];
+                
+                const exportRow = {};
+                const colsToExport = [...COLUMNS, 'Storage Type', 'Zone', 'Aisle', 'Level'];
+                colsToExport.forEach(col => {
+                    exportRow[col] = row[col];
+                });
+                exportRow['Action Status'] = row._action;
+                
+                groups[act].push(exportRow);
+            });
+
+            for (const [actionName, rows] of Object.entries(groups)) {
+                let safeName = actionName;
+                if (actionName === "Tracking — Verify & Action") safeName = "Tracking";
+                if (actionName === "Multiple Items in Location") safeName = "Multiple Items";
+                if (actionName === "Multiple Expiry Dates in Location") safeName = "Multiple Expiries";
+                if (actionName === "Multiple LPNs in Location") safeName = "Multiple LPNs";
+                if (actionName === "Multiple Batches in Location") safeName = "Multiple Batches";
+                if (actionName === "Overcapacity — Locator Overfilled") safeName = "Overcapacity";
+                if (actionName === "LPN Duplication Alert") safeName = "LPN Duplications";
+                
+                safeName = safeName.replace(/[\\\/\*\?\[\]]/g, '-').replace('—', '-').trim();
+                if (safeName.length > 31) safeName = safeName.substring(0, 31).trim();
+                
+                const ws = XLSX.utils.json_to_sheet(rows);
+                XLSX.utils.book_append_sheet(wb, ws, safeName);
+            }
+
+            XLSX.writeFile(wb, "WMS_Issues_Report.xlsx");
+        }
+        window.exportAllIssuesToExcel = exportAllIssuesToExcel;
+
         function handleFileUpload(file, type) {
             if (!file) return;
             state.loading = true;
@@ -861,20 +873,6 @@
             });
         }
 
-        // ══════════════════════════════════════════════════════════════════════════════
-        // MAIN DATA PROCESSING PIPELINE
-        // ── Changes vs original: ─────────────────────────────────────────────────
-        // 1. Builds locMap keyed by toMatchKey() (alphanumeric) for cross-file lookup
-        //    while preserving raw strings for display (locRawMap).
-        // 2. Uses alias arrays (STOR_COL_ALIASES / LOC_COL_ALIASES / etc.) for all
-        //    header discovery — no more single-alias blind spots.
-        // 3. Removed ALL hardcoded org fallbacks (no 'RW1', 'QW1' anywhere).
-        //    Orgs/Divisions are discovered 100% dynamically from uploaded data.
-        // 4. determineStorageCategory now returns 'Dummy Location Bucket' (not
-        //    'Dummy Location') ensuring the 6-tier order lock renders it last.
-        // 5. uniqueStorageTypes is sorted by APPROVED_STORAGE_CLASSES index so every
-        //    chart dataset, filter slicer, and KPI row follows the locked order.
-        // ══════════════════════════════════════════════════════════════════════════════
         function processDataPipeline() {
             if (!state.sohData || state.sohData.length === 0) return;
 
@@ -883,9 +881,6 @@
                 return userHeader && row[userHeader] !== null && row[userHeader] !== undefined ? String(row[userHeader]).trim() : '';
             };
 
-            // ── Dual-key location maps ────────────────────────────────────────────
-            // locMap     : matchKey (alphanumeric) → locRow object  (for fast lookup)
-            // locRawMap  : matchKey               → raw display string (for UI display)
             const locMap    = new Map();
             const locRawMap = new Map();
             let storageKeyLoc = null;
@@ -903,23 +898,21 @@
 
             if (state.locData && state.locData.length > 0) {
                 const headers = Object.keys(state.locData[0]);
-                // ── Alias-based column discovery (handles any column naming variant) ──
                 storageKeyLoc = findColByAliases(headers, STOR_COL_ALIASES);
                 locKeyLoc     = findColByAliases(headers, LOC_COL_ALIASES);
                 zoneKeyLoc    = findColByAliases(headers, ZONE_COL_ALIASES);
                 whKeyLoc      = findColByAliases(headers, ORG_COL_ALIASES);
 
                 state.locData.forEach(locRow => {
-                    // Retrieve raw location string (preserve dots/special chars for display)
                     const locRaw = String(
                         locRow['Location'] || locRow['Locator'] ||
                         (locKeyLoc ? locRow[locKeyLoc] : '') || ''
                     ).trim();
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw); // alphanumeric backend key
-                    locMap.set(locKey, locRow);        // keyed by matchKey for reliable lookup
-                    locRawMap.set(locKey, locRaw);     // raw string preserved for display
+                    const locKey = toMatchKey(locRaw); 
+                    locMap.set(locKey, locRow);        
+                    locRawMap.set(locKey, locRaw);     
 
                     const rawStorageVal = String(
                         locRow['Storage'] || locRow['Storage Type'] ||
@@ -940,7 +933,6 @@
                         zonesSet.add(state.zoneMapping.get(lowerZone));
                     }
 
-                    // ── Dynamic org discovery — NO hardcoded fallbacks ────────────────
                     const whVal = String(
                         locRow['Warehouse Name'] || locRow['Warehouse'] ||
                         locRow['Org Code'] || (whKeyLoc ? locRow[whKeyLoc] : '') || ''
@@ -957,8 +949,6 @@
             const lpnLocationTracker = {};
             const duplicateLPNsSet = new Set();
 
-            // Zone/org data already fully populated above — no duplicate scan needed.
-            // Ensure 'Unassigned' always present for stock rows without zone metadata.
             zonesSet.add('Unassigned');
 
             state.sohData.forEach(row => {
@@ -1025,15 +1015,10 @@
                 let capacity = 1;
                 let masterLoc = {};
 
-                // ── Cross-file location lookup via toMatchKey() ───────────────────────
-                // Uses alphanumeric matchKey so "AC03.01L01.A" (QW1 format with dots)
-                // correctly matches "AC0301L01A" (AW1 format without dots) in locMap.
                 const locKey = toMatchKey(loc);
                 if (locMap.has(locKey)) {
                     masterLoc = locMap.get(locKey);
-
                     const locHeaders = Object.keys(state.locData[0]);
-                    // Alias-based storage column discovery within master row
                     const localStorageKeyLoc = findColByAliases(locHeaders, STOR_COL_ALIASES);
                     rawStorageType = String(
                         masterLoc['Storage'] || masterLoc['Storage Type'] ||
@@ -1083,19 +1068,21 @@
                 let actionColor = COLORS.GREEN;
                 const subinv = String(mapKey(row, 'Subinv')).toUpperCase();
                 
+                // ── LOGIC FIX: Re-ordered action priority to ensure LPN duplication
+                // overrides 'Unsellable/Dummy' for ghost records when exclusion is cleared.
                 if (isBulkLocator(loc)) {
                     actionLabel = "Bulk Location — Excluded";
                     actionColor = COLORS.GREY;
+                } else if (isLpnDuplicate) {
+                    actionLabel = "LPN Duplication Alert";
+                    actionColor = COLORS.RED;
+                    flagsCount.duplicates++;
                 } else if (subinv !== 'SELLABLE' && subinv !== '') {
                     actionLabel = "Unsellable / Dummy";
                     actionColor = COLORS.GREY;
                 } else if (loc.toUpperCase().includes('DUMMY') || loc.toUpperCase().includes('DZ') || storageCategory === 'Dummy Location Bucket') {
                     actionLabel = "Unsellable / Dummy";
                     actionColor = COLORS.GREY;
-                } else if (isLpnDuplicate) {
-                    actionLabel = "LPN Duplication Alert";
-                    actionColor = COLORS.RED;
-                    flagsCount.duplicates++;
                 } else if (isOvercapacity) {
                     actionLabel = "Overcapacity — Locator Overfilled";
                     actionColor = COLORS.RED;
@@ -1161,10 +1148,6 @@
             state.uniqueOrgs = Array.from(orgsSet).filter(Boolean).sort();
             state.uniqueDivisions = Array.from(divisionsSet).filter(Boolean).sort();
             state.uniqueZones = Array.from(zonesSet).filter(Boolean).sort();
-            // ── SIX-TIER ORDER LOCK on uniqueStorageTypes ─────────────────────────
-            // Sort discovered types by their index in APPROVED_STORAGE_CLASSES so that
-            // every filter slicer, chart dataset, and KPI bar follows the locked order.
-            // 'Dummy Location Bucket' always appears last (index 5).
             state.uniqueStorageTypes = Array.from(activeStorageTypesSet)
                 .filter(Boolean)
                 .sort((a, b) => {
@@ -2072,9 +2055,12 @@
                                 <div class="p-4 border-t border-slate-800 bg-slate-900/80 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0 text-xs animate-fadeIn">
                                     <div id="table-pagination-controls" class="flex-1 w-full flex flex-col sm:flex-row justify-between items-center gap-4">
                                     </div>
-                                    <div class="shrink-0 flex items-center justify-end w-full sm:w-auto mt-4 sm:mt-0 border-t sm:border-t-0 border-slate-800 pt-4 sm:pt-0 gap-2">
-                                        <button onclick="exportFilteredGrid()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded shadow transition flex items-center gap-2 w-full sm:w-auto justify-center font-mono">
-                                            ${getSVGIcon('download', 'w-4 h-4')} Export Filtered Grid View
+                                    <div class="shrink-0 flex flex-wrap items-center justify-end w-full sm:w-auto mt-4 sm:mt-0 border-t sm:border-t-0 border-slate-800 pt-4 sm:pt-0 gap-2">
+                                        <button onclick="exportFilteredGrid()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded shadow transition flex items-center gap-2 w-full sm:w-auto justify-center font-mono">
+                                            ${getSVGIcon('download', 'w-4 h-4')} Export Filtered Grid
+                                        </button>
+                                        <button onclick="exportAllIssuesToExcel()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded shadow transition flex items-center gap-2 w-full sm:w-auto justify-center font-mono">
+                                            ${getSVGIcon('file-spreadsheet', 'w-4 h-4')} Export All Issues
                                         </button>
                                     </div>
                                 </div>
@@ -2736,8 +2722,6 @@
                 usedCounts.categories[storageCat] = (usedCounts.categories[storageCat] || 0) + 1;
             });
 
-            // ── SIX-TIER ORDER LOCK applied to KPI availability row ─────────────────
-            // Order: NPS → Shuttle → Bins → Shelves → POS → Dummy Location Bucket (last)
             let availHTML = `
                 <div class="flex items-center gap-2 shrink-0 border-r border-slate-800 pr-6 mr-2">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Locs</span>
@@ -2769,7 +2753,6 @@
                 </div>
             `;
 
-            // ── SIX-TIER ORDER LOCK applied to KPI used-locations row ──────────────
             let usedHTML = `
                 <div class="flex items-center gap-2 shrink-0 border-r border-slate-800 pr-6 mr-2">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Used Locs</span>
