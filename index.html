@@ -68,6 +68,7 @@
         const ORG_COL_ALIASES   = ['org code', 'org', 'warehouse org', 'orgcode', 'wh org',
                                    'organization', 'warehouse name', 'warehouse'];
         const ZONE_COL_ALIASES  = ['zone name', 'zone_name', 'zone'];
+        const CAPACITY_COL_ALIASES = ['capacity', 'tunnel capacity', 'location capacity', 'max lpn', 'max lpns', 'pallet capacity'];
 
         const toMatchKey = (val) => String(val || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
 
@@ -187,12 +188,220 @@
             "Multiple Expiry Dates in Location",
             "Multiple LPNs in Location",
             "Multiple Batches in Location",
+            "Multiple Divisions in Location",
+            "Multiple Subinventories in Location",
             "Single LPN in Shuttle",
             "Unsellable / Dummy",
             "Overcapacity — Locator Overfilled",
             "LPN Duplication Alert",
+            "Expired Sellable Stock",
+            "Status Conflict — Sellable Stock",
+            "Location Missing from Master",
+            "Org Mismatch with Location Master",
+            "Zero / Negative Inventory Quantity",
+            "Missing Mandatory Inventory Data",
+            "Same LPN — Multiple SKUs",
+            "Same LPN — Multiple Lots / Expiry",
+            "Same Batch — Different Expiry",
+            "Duplicate Inventory Record",
+            "Missing / Invalid Location Capacity",
+            "Unmapped Storage Type / Classification",
             "Bulk Location — Excluded"
         ];
+
+        const ACTION_META = {
+            "Matching — No Action Required": { color: COLORS.GREEN },
+            "Tracking — Verify & Action": { color: COLORS.RED, flagKey: 'tracking' },
+            "Multiple Items in Location": { color: COLORS.RED, flagKey: 'multiItem' },
+            "Multiple Expiry Dates in Location": { color: COLORS.RED, flagKey: 'multiExp' },
+            "Multiple LPNs in Location": { color: COLORS.ORANGE, flagKey: 'multiLpn' },
+            "Multiple Batches in Location": { color: COLORS.ORANGE, flagKey: 'multiBatch' },
+            "Multiple Divisions in Location": { color: COLORS.RED, flagKey: 'multiDivision' },
+            "Multiple Subinventories in Location": { color: COLORS.RED, flagKey: 'multiSubinv' },
+            "Single LPN in Shuttle": { color: COLORS.YELLOW, flagKey: 'shuttleSingle' },
+            "Unsellable / Dummy": { color: COLORS.GREY },
+            "Overcapacity — Locator Overfilled": { color: COLORS.RED, flagKey: 'overcapacity' },
+            "LPN Duplication Alert": { color: COLORS.RED, flagKey: 'duplicates' },
+            "Expired Sellable Stock": { color: COLORS.RED, flagKey: 'expiredSellable' },
+            "Status Conflict — Sellable Stock": { color: COLORS.RED, flagKey: 'statusConflict' },
+            "Location Missing from Master": { color: COLORS.RED, flagKey: 'missingMasterLocation' },
+            "Org Mismatch with Location Master": { color: COLORS.RED, flagKey: 'orgMismatch' },
+            "Zero / Negative Inventory Quantity": { color: COLORS.RED, flagKey: 'nonPositiveQty' },
+            "Missing Mandatory Inventory Data": { color: COLORS.RED, flagKey: 'missingMandatory' },
+            "Same LPN — Multiple SKUs": { color: COLORS.RED, flagKey: 'lpnMultiSku' },
+            "Same LPN — Multiple Lots / Expiry": { color: COLORS.RED, flagKey: 'lpnMultiLotExpiry' },
+            "Same Batch — Different Expiry": { color: COLORS.RED, flagKey: 'batchExpiryConflict' },
+            "Duplicate Inventory Record": { color: COLORS.RED, flagKey: 'duplicateRecord' },
+            "Missing / Invalid Location Capacity": { color: COLORS.ORANGE, flagKey: 'invalidCapacity' },
+            "Unmapped Storage Type / Classification": { color: COLORS.RED, flagKey: 'unmappedStorage' },
+            "Bulk Location — Excluded": { color: COLORS.GREY }
+        };
+
+        const FLAG_CARD_CONFIG = [
+            { key: 'overcapacity', action: 'Overcapacity — Locator Overfilled', label: 'Overcapacity / Overfill', tone: 'critical' },
+            { key: 'duplicates', action: 'LPN Duplication Alert', label: 'LPN Duplication Alerts', tone: 'critical' },
+            { key: 'multiDivision', action: 'Multiple Divisions in Location', label: 'Multiple Divisions / Loc', tone: 'critical' },
+            { key: 'multiSubinv', action: 'Multiple Subinventories in Location', label: 'Multiple Subinventories / Loc', tone: 'critical' },
+            { key: 'missingMasterLocation', action: 'Location Missing from Master', label: 'Location Missing from Master', tone: 'critical' },
+            { key: 'orgMismatch', action: 'Org Mismatch with Location Master', label: 'Org / Location Master Mismatch', tone: 'critical' },
+            { key: 'unmappedStorage', action: 'Unmapped Storage Type / Classification', label: 'Unmapped Storage Classification', tone: 'critical' },
+            { key: 'expiredSellable', action: 'Expired Sellable Stock', label: 'Expired Sellable Stock', tone: 'critical' },
+            { key: 'statusConflict', action: 'Status Conflict — Sellable Stock', label: 'Sellable Status Conflicts', tone: 'critical' },
+            { key: 'missingMandatory', action: 'Missing Mandatory Inventory Data', label: 'Missing Mandatory Data', tone: 'critical' },
+            { key: 'nonPositiveQty', action: 'Zero / Negative Inventory Quantity', label: 'Zero / Negative Quantity', tone: 'critical' },
+            { key: 'lpnMultiSku', action: 'Same LPN — Multiple SKUs', label: 'Same LPN: Multiple SKUs', tone: 'critical' },
+            { key: 'lpnMultiLotExpiry', action: 'Same LPN — Multiple Lots / Expiry', label: 'Same LPN: Multiple Lots / Expiry', tone: 'critical' },
+            { key: 'batchExpiryConflict', action: 'Same Batch — Different Expiry', label: 'Same Batch: Different Expiry', tone: 'critical' },
+            { key: 'duplicateRecord', action: 'Duplicate Inventory Record', label: 'Duplicate Inventory Records', tone: 'critical' },
+            { key: 'multiItem', action: 'Multiple Items in Location', label: 'Multiple Items / Loc', tone: 'critical' },
+            { key: 'multiExp', action: 'Multiple Expiry Dates in Location', label: 'Multiple Expiry Dates / Loc', tone: 'critical' },
+            { key: 'multiLpn', action: 'Multiple LPNs in Location', label: 'Multiple LPNs / Loc', tone: 'high' },
+            { key: 'multiBatch', action: 'Multiple Batches in Location', label: 'Multiple Batches / Loc', tone: 'high' },
+            { key: 'invalidCapacity', action: 'Missing / Invalid Location Capacity', label: 'Missing / Invalid Capacity', tone: 'high' },
+            { key: 'shuttleSingle', action: 'Single LPN in Shuttle', label: 'Single LPN in Shuttle', tone: 'warning' },
+            { key: 'tracking', action: 'Tracking — Verify & Action', label: 'Tracking / Verify & Action', tone: 'critical' }
+        ];
+
+        const ACTION_PRIORITY = [
+            'Missing Mandatory Inventory Data',
+            'Location Missing from Master',
+            'Org Mismatch with Location Master',
+            'Unmapped Storage Type / Classification',
+            'Status Conflict — Sellable Stock',
+            'Expired Sellable Stock',
+            'LPN Duplication Alert',
+            'Same LPN — Multiple SKUs',
+            'Same LPN — Multiple Lots / Expiry',
+            'Same Batch — Different Expiry',
+            'Duplicate Inventory Record',
+            'Overcapacity — Locator Overfilled',
+            'Multiple Divisions in Location',
+            'Multiple Subinventories in Location',
+            'Multiple Items in Location',
+            'Multiple Expiry Dates in Location',
+            'Multiple LPNs in Location',
+            'Multiple Batches in Location',
+            'Missing / Invalid Location Capacity',
+            'Zero / Negative Inventory Quantity',
+            'Single LPN in Shuttle'
+        ];
+
+        function getActionColor(action) {
+            return (ACTION_META[action] && ACTION_META[action].color) || COLORS.GREY;
+        }
+
+        function blankFlagCounts() {
+            return Object.fromEntries(FLAG_CARD_CONFIG.map(flag => [flag.key, 0]));
+        }
+
+        function getIssueCounts(rows) {
+            const counts = blankFlagCounts();
+            rows.forEach(row => {
+                const issues = Array.isArray(row._issues) ? row._issues : [row._action];
+                issues.forEach(issue => {
+                    const key = ACTION_META[issue] && ACTION_META[issue].flagKey;
+                    if (key && Object.prototype.hasOwnProperty.call(counts, key)) counts[key]++;
+                });
+            });
+            return counts;
+        }
+
+        function getFlagCardsHTML() {
+            const classes = {
+                critical: 'bg-red-950/20 border-red-500/20 text-red-400 bg-red-500/10',
+                high: 'bg-orange-950/20 border-orange-500/20 text-orange-400 bg-orange-500/10',
+                warning: 'bg-yellow-950/20 border-yellow-500/20 text-yellow-400 bg-yellow-500/10'
+            };
+            return FLAG_CARD_CONFIG.map(flag => {
+                const tone = classes[flag.tone] || classes.critical;
+                const parts = tone.split(' ');
+                return `
+                    <button type="button" onclick="filterToIssue('${flag.action}')" title="Filter the grid to ${flag.action}" class="w-full flex justify-between items-center gap-3 p-2.5 ${parts[0]} border ${parts[1]} rounded-xl hover:brightness-125 transition text-left animate-fadeIn font-mono">
+                        <span class="${parts[2]} text-xs font-medium leading-tight">${flag.label}</span>
+                        <span id="flag-${flag.key}" class="shrink-0 text-xs font-bold ${parts[3]} px-2 py-0.5 rounded ${parts[2]} font-mono">0</span>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function getFirstNonBlankValue(row, candidates = [], fallbackHeader = null) {
+            for (const candidate of candidates) {
+                if (Object.prototype.hasOwnProperty.call(row, candidate) && row[candidate] !== null && row[candidate] !== undefined) {
+                    const value = String(row[candidate]).trim();
+                    if (value !== '') return value;
+                }
+            }
+            if (fallbackHeader && Object.prototype.hasOwnProperty.call(row, fallbackHeader) && row[fallbackHeader] !== null && row[fallbackHeader] !== undefined) {
+                return String(row[fallbackHeader]).trim();
+            }
+            return '';
+        }
+
+        function isApprovedStorageType(rawStorageType) {
+            const value = String(rawStorageType || '').trim().toLowerCase();
+            return APPROVED_STORAGE_CLASSES.slice(0, 5).some(category => category.toLowerCase() === value);
+        }
+
+        function isTrackingStorageType(rawStorageType) {
+            const value = String(rawStorageType || '').trim().toLowerCase();
+            return TRACKING_TYPES.some(type => type.toLowerCase() === value);
+        }
+
+        function isExplicitNonSellableStorage(rawStorageType, locator = '') {
+            const storage = String(rawStorageType || '').trim().toUpperCase();
+            const loc = String(locator || '').trim().toUpperCase();
+            if (isTrackingStorageType(rawStorageType)) return true;
+            return storage.includes('DUMMY') || storage.includes('UNSELLABLE') || loc.includes('DUMMY') || loc.includes('DMG') || loc.startsWith('DZ');
+        }
+
+        function buildCompositeKey(...parts) {
+            return parts.map(part => toMatchKey(part) || '∅').join('|');
+        }
+
+        function isBlockingInventoryStatus(value) {
+            const status = String(value || '').trim().toUpperCase();
+            if (!status) return false;
+            return /(HOLD|BLOCK|DAMAGE|EXPIRED|\bQC\b|QUARANTINE|RETURN|REJECT|UNSELLABLE|SUSPEND)/.test(status);
+        }
+
+        function getSafeSheetName(actionName, usedNames) {
+            const aliases = {
+                'Tracking — Verify & Action': 'Tracking',
+                'Multiple Items in Location': 'Multiple Items',
+                'Multiple Expiry Dates in Location': 'Multiple Expiries',
+                'Multiple LPNs in Location': 'Multiple LPNs',
+                'Multiple Batches in Location': 'Multiple Batches',
+                'Multiple Divisions in Location': 'Multiple Divisions',
+                'Multiple Subinventories in Location': 'Multi Subinventories',
+                'Overcapacity — Locator Overfilled': 'Overcapacity',
+                'LPN Duplication Alert': 'LPN Duplications',
+                'Expired Sellable Stock': 'Expired Sellable',
+                'Status Conflict — Sellable Stock': 'Status Conflict',
+                'Location Missing from Master': 'Master Location Missing',
+                'Org Mismatch with Location Master': 'Org Master Mismatch',
+                'Zero / Negative Inventory Quantity': 'Zero Negative Quantity',
+                'Missing Mandatory Inventory Data': 'Missing Mandatory Data',
+                'Same LPN — Multiple SKUs': 'LPN Multiple SKUs',
+                'Same LPN — Multiple Lots / Expiry': 'LPN Multiple Lot Expiry',
+                'Same Batch — Different Expiry': 'Batch Expiry Conflict',
+                'Duplicate Inventory Record': 'Duplicate Records',
+                'Missing / Invalid Location Capacity': 'Invalid Capacity',
+                'Unmapped Storage Type / Classification': 'Unmapped Storage'
+            };
+            let base = (aliases[actionName] || actionName).replace(/[\\\/?*\[\]:]/g, '-').replace('—', '-').trim();
+            if (!base) base = 'Issues';
+            base = base.substring(0, 31).trim();
+            let candidate = base;
+            let suffix = 2;
+            while (usedNames.has(candidate)) {
+                const suffixText = ` (${suffix})`;
+                candidate = `${base.substring(0, 31 - suffixText.length)}${suffixText}`;
+                suffix++;
+            }
+            usedNames.add(candidate);
+            return candidate;
+        }
+
 
         function getSVGIcon(name, className = "w-4 h-4", size = "18") {
             const icons = {
@@ -354,11 +563,6 @@
             state.bulkLocations = [];
             state.bulkExclusionKeys = new Set();
 
-            const mapKey = (row, key) => {
-                const userHeader = state.columnMapping[key];
-                return userHeader && row[userHeader] !== null && row[userHeader] !== undefined ? String(row[userHeader]).trim() : '';
-            };
-
             const locMatchKeyToRaw = new Map();
 
             if (state.locData && state.locData.length > 0) {
@@ -367,43 +571,33 @@
                 const locKeyLoc     = findColByAliases(headers, LOC_COL_ALIASES);
 
                 state.locData.forEach(locRow => {
-                    const locRaw = String(
-                        locRow['Location'] || locRow['Locator'] ||
-                        (locKeyLoc ? locRow[locKeyLoc] : '') || ''
-                    ).trim();
+                    const locRaw = getFirstNonBlankValue(locRow, ['Location', 'Locator'], locKeyLoc);
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw); 
+                    const locKey = toMatchKey(locRaw);
                     locMatchKeyToRaw.set(locKey, locRaw);
 
-                    const rawStorageVal = String(
-                        locRow['Storage'] || locRow['Storage Type'] ||
-                        (storageKeyLoc ? locRow[storageKeyLoc] : '') || ''
-                    ).trim();
-                    const cat = determineStorageCategory(rawStorageVal);
-
-                    if (cat === 'Dummy Location Bucket') {
+                    const rawStorageVal = getFirstNonBlankValue(locRow, ['Storage', 'Storage Type'], storageKeyLoc);
+                    // Only known non-sellable / tracking coordinates are auto-excluded. Unknown
+                    // classifications remain active and are surfaced by the Unmapped Storage validation.
+                    if (isExplicitNonSellableStorage(rawStorageVal, locRaw)) {
                         state.bulkExclusionKeys.add(locKey);
-                        if (!state.bulkLocations.includes(locRaw)) {
-                            state.bulkLocations.push(locRaw);
-                        }
+                        if (!state.bulkLocations.includes(locRaw)) state.bulkLocations.push(locRaw);
                     }
                 });
             }
 
             if (state.sohData && state.sohData.length > 0) {
                 state.sohData.forEach(row => {
-                    const locRaw = mapKey(row, 'Locator') || 'UNKNOWN';
+                    const userHeader = state.columnMapping['Locator'];
+                    const locRaw = userHeader && row[userHeader] !== null && row[userHeader] !== undefined
+                        ? String(row[userHeader]).trim()
+                        : '';
+                    if (!locRaw) return;
                     const locKey = toMatchKey(locRaw);
-                    if (!locMatchKeyToRaw.has(locKey)) {
-                        const rawStorageType = parseStorageTypeFromLocator(locRaw);
-                        const cat = determineStorageCategory(rawStorageType);
-                        if (cat === 'Dummy Location Bucket') {
-                            state.bulkExclusionKeys.add(locKey);
-                            if (!state.bulkLocations.includes(locRaw)) {
-                                state.bulkLocations.push(locRaw);
-                            }
-                        }
+                    if (!locMatchKeyToRaw.has(locKey) && isExplicitNonSellableStorage('', locRaw)) {
+                        state.bulkExclusionKeys.add(locKey);
+                        if (!state.bulkLocations.includes(locRaw)) state.bulkLocations.push(locRaw);
                     }
                 });
             }
@@ -557,15 +751,11 @@
             globallyFiltered.forEach(row => {
                 counts[row._action] = (counts[row._action] || 0) + 1;
             });
-            return ACTION_LABELS.map(key => {
-                const found = state.processedData.find(p => p._action === key);
-                const color = found ? found._color : COLORS.GREY;
-                return {
-                    name: key,
-                    value: counts[key] || 0,
-                    color: color
-                };
-            }).filter(item => item.value > 0);
+            return ACTION_LABELS.map(key => ({
+                name: key,
+                value: counts[key] || 0,
+                color: getActionColor(key)
+            })).filter(item => item.value > 0);
         }
 
         function toggleFilterGroup(filterType, action) {
@@ -641,29 +831,34 @@
         }
         window.clearAllFilters = clearAllFilters;
 
+        function csvValue(row, header) {
+            if (header === 'Primary Action') return row._action || '';
+            if (header === 'All Validation Flags') return (row._issues || []).join(' • ');
+            return row[header] || '';
+        }
+
+        function buildCsvDownload(rows, headers, filename) {
+            const csvContent = 'data:text/csv;charset=utf-8,'
+                + headers.join(',') + '\n'
+                + rows.map(row => headers.map(header => `"${String(csvValue(row, header)).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const link = document.createElement('a');
+            link.setAttribute('href', encodeURI(csvContent));
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
         function downloadExpiryLog() {
             const globallyFiltered = getGloballyFilteredData();
             const plus90 = new Date();
             plus90.setDate(plus90.getDate() + 90);
-            const expiryRows = globallyFiltered.filter(row => {
-                return row._action !== "Bulk Location — Excluded" && row._expDateObj && row._expDateObj <= plus90;
-            });
+            const expiryRows = globallyFiltered.filter(row => row._action !== 'Bulk Location — Excluded' && row._expDateObj && row._expDateObj <= plus90);
             if (expiryRows.length === 0) {
-                alert("No active expiry warning records tracked under the 90-day window to download.");
+                alert('No active expiry warning records tracked under the 90-day window to download.');
                 return;
             }
-            const headers = [...COLUMNS, 'Storage Type', '_action'];
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + headers.join(",") + "\n"
-                + expiryRows.map(e => headers.map(h => `"${String(e[h] || '').replace(/"/g, '""')}"`).join(",")).join("\n");
-            
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "wms_expiry_warnings_under_90d.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            buildCsvDownload(expiryRows, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_expiry_warnings_under_90d.csv');
         }
         window.downloadExpiryLog = downloadExpiryLog;
 
@@ -676,92 +871,55 @@
                 return rowLevelClean === '01' && row._expDateObj && row._expDateObj <= plus15;
             });
             if (groundExpiries.length === 0) {
-                alert("No active ground level expiry warning records tracked under the 15-day window to download.");
+                alert('No active ground level expiry warning records tracked under the 15-day window to download.');
                 return;
             }
-            const headers = [...COLUMNS, 'Storage Type', '_action'];
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + headers.join(",") + "\n"
-                + groundExpiries.map(e => headers.map(h => `"${String(e[h] || '').replace(/"/g, '""')}"`).join(",")).join("\n");
-            
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "wms_ground_level_expiries_under_15d.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            buildCsvDownload(groundExpiries, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_ground_level_expiries_under_15d.csv');
         }
         window.downloadGroundExpiryLog = downloadGroundExpiryLog;
 
         function exportFilteredGrid() {
             const filtered = getFilteredData();
             if (filtered.length === 0) return;
-            const headers = [...COLUMNS, 'Storage Type', '_action'];
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + headers.join(",") + "\n"
-                + filtered.map(e => headers.map(h => `"${String(e[h] || '').replace(/"/g, '""')}"`).join(",")).join("\n");
-            
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "wms_filtered_grid_export.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            buildCsvDownload(filtered, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_filtered_grid_export.csv');
         }
         window.exportFilteredGrid = exportFilteredGrid;
 
         // ── EXPORT ALL ISSUES TO MULTI-SHEET EXCEL ────────────────────────────────────
         function exportAllIssuesToExcel() {
             const data = getGloballyFilteredData();
-            
-            // Filter out 'Matching' and 'Excluded' (if any are still hiding in data)
-            const issues = data.filter(row => 
-                row._action !== "Matching — No Action Required" && 
-                row._action !== "Bulk Location — Excluded"
-            );
-
-            if (issues.length === 0) {
-                alert("No issues found to export under current org/division filters.");
+            const rowsWithIssues = data.filter(row => {
+                const issues = row._issues || [row._action];
+                return issues.some(issue => issue !== 'Matching — No Action Required' && issue !== 'Bulk Location — Excluded');
+            });
+            if (rowsWithIssues.length === 0) {
+                alert('No issues found to export under current org/division filters.');
                 return;
             }
 
             const wb = XLSX.utils.book_new();
             const groups = {};
-            
-            issues.forEach(row => {
-                const act = row._action;
-                if (!groups[act]) groups[act] = [];
-                
-                const exportRow = {};
-                const colsToExport = [...COLUMNS, 'Storage Type', 'Zone', 'Aisle', 'Level'];
-                colsToExport.forEach(col => {
-                    exportRow[col] = row[col];
+            rowsWithIssues.forEach(row => {
+                (row._issues || [row._action]).forEach(issue => {
+                    if (issue === 'Matching — No Action Required' || issue === 'Bulk Location — Excluded') return;
+                    if (!groups[issue]) groups[issue] = [];
+                    const exportRow = {};
+                    [...COLUMNS, 'Storage Type', 'Zone', 'Aisle', 'Level', 'Capacity'].forEach(col => {
+                        exportRow[col] = row[col];
+                    });
+                    exportRow['Primary Action'] = row._action;
+                    exportRow['Validation Flag'] = issue;
+                    exportRow['All Validation Flags'] = (row._issues || []).join(' • ');
+                    groups[issue].push(exportRow);
                 });
-                exportRow['Action Status'] = row._action;
-                
-                groups[act].push(exportRow);
             });
 
-            for (const [actionName, rows] of Object.entries(groups)) {
-                let safeName = actionName;
-                if (actionName === "Tracking — Verify & Action") safeName = "Tracking";
-                if (actionName === "Multiple Items in Location") safeName = "Multiple Items";
-                if (actionName === "Multiple Expiry Dates in Location") safeName = "Multiple Expiries";
-                if (actionName === "Multiple LPNs in Location") safeName = "Multiple LPNs";
-                if (actionName === "Multiple Batches in Location") safeName = "Multiple Batches";
-                if (actionName === "Overcapacity — Locator Overfilled") safeName = "Overcapacity";
-                if (actionName === "LPN Duplication Alert") safeName = "LPN Duplications";
-                
-                safeName = safeName.replace(/[\\\/\*\?\[\]]/g, '-').replace('—', '-').trim();
-                if (safeName.length > 31) safeName = safeName.substring(0, 31).trim();
-                
+            const usedNames = new Set();
+            Object.entries(groups).forEach(([actionName, rows]) => {
                 const ws = XLSX.utils.json_to_sheet(rows);
-                XLSX.utils.book_append_sheet(wb, ws, safeName);
-            }
-
-            XLSX.writeFile(wb, "WMS_Issues_Report.xlsx");
+                XLSX.utils.book_append_sheet(wb, ws, getSafeSheetName(actionName, usedNames));
+            });
+            XLSX.writeFile(wb, 'WMS_Issues_Report.xlsx');
         }
         window.exportAllIssuesToExcel = exportAllIssuesToExcel;
 
@@ -880,268 +1038,315 @@
                 const userHeader = state.columnMapping[key];
                 return userHeader && row[userHeader] !== null && row[userHeader] !== undefined ? String(row[userHeader]).trim() : '';
             };
+            const hasSohColumn = (key) => Boolean(state.columnMapping[key]);
+            const hasLocationMaster = Boolean(state.locData && state.locData.length > 0);
+            const locationKey = (org, loc) => buildCompositeKey(org, loc);
 
-            const locMap    = new Map();
-            const locRawMap = new Map();
+            const locMapByOrg = new Map();
+            const locMapFallback = new Map();
+            const activeStorageTypesSet = new Set();
+            const orgsSet = new Set();
+            const zonesSet = new Set(['Unassigned']);
             let storageKeyLoc = null;
             let locKeyLoc = null;
             let zoneKeyLoc = null;
             let whKeyLoc = null;
-            const activeStorageTypesSet = new Set();
-            const orgsSet = new Set();
-            const zonesSet = new Set();
+            let capacityKeyLoc = null;
 
             state.locationMetrics = {
                 available: { total: 0, categories: {} },
                 used: { total: 0, categories: {} }
             };
 
-            if (state.locData && state.locData.length > 0) {
+            if (hasLocationMaster) {
                 const headers = Object.keys(state.locData[0]);
                 storageKeyLoc = findColByAliases(headers, STOR_COL_ALIASES);
                 locKeyLoc     = findColByAliases(headers, LOC_COL_ALIASES);
                 zoneKeyLoc    = findColByAliases(headers, ZONE_COL_ALIASES);
                 whKeyLoc      = findColByAliases(headers, ORG_COL_ALIASES);
+                capacityKeyLoc = findColByAliases(headers, CAPACITY_COL_ALIASES);
 
                 state.locData.forEach(locRow => {
-                    const locRaw = String(
-                        locRow['Location'] || locRow['Locator'] ||
-                        (locKeyLoc ? locRow[locKeyLoc] : '') || ''
-                    ).trim();
+                    const locRaw = getFirstNonBlankValue(locRow, ['Location', 'Locator'], locKeyLoc);
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw); 
-                    locMap.set(locKey, locRow);        
-                    locRawMap.set(locKey, locRaw);     
-
-                    const rawStorageVal = String(
-                        locRow['Storage'] || locRow['Storage Type'] ||
-                        (storageKeyLoc ? locRow[storageKeyLoc] : '') || ''
-                    ).trim();
+                    const locKey = toMatchKey(locRaw);
+                    const masterOrg = getFirstNonBlankValue(locRow, ['Warehouse Name', 'Warehouse', 'Org Code'], whKeyLoc);
+                    const rawStorageVal = getFirstNonBlankValue(locRow, ['Storage', 'Storage Type'], storageKeyLoc);
                     const category = determineStorageCategory(rawStorageVal);
+
+                    locMapFallback.set(locKey, locRow);
+                    if (masterOrg) locMapByOrg.set(locationKey(masterOrg, locRaw), locRow);
                     activeStorageTypesSet.add(category);
 
-                    const rawZoneVal = String(
-                        locRow['Zone Name'] || locRow['Zone'] ||
-                        (zoneKeyLoc ? locRow[zoneKeyLoc] : '') || ''
-                    ).trim();
+                    const rawZoneVal = getFirstNonBlankValue(locRow, ['Zone Name', 'Zone'], zoneKeyLoc);
                     if (rawZoneVal) {
                         const lowerZone = rawZoneVal.toLowerCase();
-                        if (!state.zoneMapping.has(lowerZone)) {
-                            state.zoneMapping.set(lowerZone, rawZoneVal);
-                        }
+                        if (!state.zoneMapping.has(lowerZone)) state.zoneMapping.set(lowerZone, rawZoneVal);
                         zonesSet.add(state.zoneMapping.get(lowerZone));
                     }
-
-                    const whVal = String(
-                        locRow['Warehouse Name'] || locRow['Warehouse'] ||
-                        locRow['Org Code'] || (whKeyLoc ? locRow[whKeyLoc] : '') || ''
-                    ).trim();
-                    if (whVal) orgsSet.add(whVal);
+                    if (masterOrg) orgsSet.add(masterOrg);
                 });
             }
 
-            const locStats = {};
-            let totalQty = 0;
-            let totalVal = 0;
-            
+            const locStats = new Map();
+            const lpnStats = new Map();
+            const batchExpiryStats = new Map();
+            const duplicateRecordCounts = new Map();
             const divisionsSet = new Set();
-            const lpnLocationTracker = {};
-            const duplicateLPNsSet = new Set();
 
-            zonesSet.add('Unassigned');
+            const makeLocStats = () => ({
+                items: new Set(), lpns: new Set(), exps: new Set(), batches: new Set(),
+                divisions: new Set(), subinvs: new Set(), rows: []
+            });
+            const makeLpnStats = () => ({ items: new Set(), lots: new Set(), exps: new Set(), locations: new Set() });
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
 
             state.sohData.forEach(row => {
                 const loc = mapKey(row, 'Locator') || 'UNKNOWN';
-                
-                if (isBulkLocator(loc)) {
-                    const csQty = coerceFloat(mapKey(row, 'CS QTY'));
-                    const puomQty = coerceFloat(mapKey(row, 'PUOM QTY'));
-                    const puomCst = coerceFloat(mapKey(row, 'PUOM CST'));
-                    totalQty += csQty;
-                    totalVal += (puomQty * puomCst);
-                    return;
-                }
-                const org = mapKey(row, 'Org Code') || 'UNKNOWN';
-                const division = (mapKey(row, 'Division') || '').trim() || 'Unassigned';
-                const lpn = mapKey(row, 'LPN NO') || '';
-                const item = mapKey(row, 'Item Code') || '';
-                const exp = mapKey(row, 'EXP Date') || '';
-                const batch = mapKey(row, 'Supplier LOT') || '';
-                const csQty = coerceFloat(mapKey(row, 'CS QTY'));
-                const puomQty = coerceFloat(mapKey(row, 'PUOM QTY'));
-                const puomCst = coerceFloat(mapKey(row, 'PUOM CST'));
+                if (isBulkLocator(loc)) return;
+
+                const orgRaw = mapKey(row, 'Org Code');
+                const org = orgRaw || 'UNKNOWN';
+                const divisionRaw = mapKey(row, 'Division');
+                const division = divisionRaw || 'Unassigned';
+                const lpn = mapKey(row, 'LPN NO');
+                const item = mapKey(row, 'Item Code');
+                const exp = mapKey(row, 'EXP Date');
+                const supplierLot = mapKey(row, 'Supplier LOT');
+                const lotNum = mapKey(row, 'LOT NUM');
+                const marsBatch = mapKey(row, 'Mars Batch');
+                const batchKey = supplierLot || lotNum || marsBatch;
+                const subinv = mapKey(row, 'Subinv');
+                const locGroupKey = locationKey(org, loc);
+                const lpnGroupKey = lpn ? buildCompositeKey(org, lpn) : '';
+
                 orgsSet.add(org);
-                if (division) divisionsSet.add(division);
-                if (lpn) {
-                    if (!lpnLocationTracker[lpn]) {
-                        lpnLocationTracker[lpn] = new Set();
-                    }
-                    lpnLocationTracker[lpn].add(loc);
-                    if (lpnLocationTracker[lpn].size > 1) {
-                        duplicateLPNsSet.add(lpn);
-                    }
+                divisionsSet.add(division);
+
+                if (!locStats.has(locGroupKey)) locStats.set(locGroupKey, makeLocStats());
+                const stats = locStats.get(locGroupKey);
+                if (item) stats.items.add(toMatchKey(item));
+                if (lpn) stats.lpns.add(toMatchKey(lpn));
+                if (exp) stats.exps.add(String(exp).trim());
+                if (batchKey) stats.batches.add(toMatchKey(batchKey));
+                if (divisionRaw) stats.divisions.add(toMatchKey(divisionRaw));
+                if (subinv) stats.subinvs.add(toMatchKey(subinv));
+                stats.rows.push(row);
+
+                if (lpnGroupKey) {
+                    if (!lpnStats.has(lpnGroupKey)) lpnStats.set(lpnGroupKey, makeLpnStats());
+                    const lpnGroup = lpnStats.get(lpnGroupKey);
+                    if (item) lpnGroup.items.add(toMatchKey(item));
+                    if (batchKey) lpnGroup.lots.add(toMatchKey(batchKey));
+                    if (exp) lpnGroup.exps.add(String(exp).trim());
+                    lpnGroup.locations.add(toMatchKey(loc));
                 }
-                if (!locStats[loc]) {
-                    locStats[loc] = { 
-                        items: new Set(), 
-                        lpns: new Set(), 
-                        exps: new Set(), 
-                        batches: new Set(),
-                        rows: []
-                    };
+
+                if (batchKey && item && divisionRaw) {
+                    const batchGroupKey = buildCompositeKey(org, divisionRaw, item, batchKey);
+                    if (!batchExpiryStats.has(batchGroupKey)) batchExpiryStats.set(batchGroupKey, new Set());
+                    if (exp) batchExpiryStats.get(batchGroupKey).add(String(exp).trim());
                 }
-                if (item) locStats[loc].items.add(item);
-                if (lpn) locStats[loc].lpns.add(lpn);
-                if (exp) locStats[loc].exps.add(exp);
-                if (batch) locStats[loc].batches.add(batch);
-                locStats[loc].rows.push(row);
-                totalQty += csQty;
-                totalVal += (puomQty * puomCst);
+
+                const duplicateRecordKey = buildCompositeKey(
+                    orgRaw, divisionRaw, loc, lpn, item, batchKey, exp,
+                    String(coerceFloat(mapKey(row, 'PUOM QTY'))), String(coerceFloat(mapKey(row, 'CS QTY')))
+                );
+                duplicateRecordCounts.set(duplicateRecordKey, (duplicateRecordCounts.get(duplicateRecordKey) || 0) + 1);
             });
 
             const processed = [];
             const actionCounts = {};
-            let flagsCount = { multiItem: 0, multiLpn: 0, shuttleSingle: 0, multiExp: 0, multiBatch: 0, track: 0, overcapacity: 0, duplicates: 0 };
-            
+            const flagsCount = blankFlagCounts();
+
             state.sohData.forEach((row, idx) => {
-                const loc = mapKey(row, 'Locator') || 'UNKNOWN';
-                const division = (mapKey(row, 'Division') || '').trim() || 'Unassigned';
-                const stats = locStats[loc] || { items: new Set(), lpns: new Set(), exps: new Set(), batches: new Set(), rows: [] };
-                
-                let rawStorageType;
-                let zone;
-                let coords = parseAisleLevelFromLocator(loc);
-                let capacity = 1;
-                let masterLoc = {};
+                const rawOrg = mapKey(row, 'Org Code');
+                const org = rawOrg || 'UNKNOWN';
+                const rawDivision = mapKey(row, 'Division');
+                const division = rawDivision || 'Unassigned';
+                const rawLocator = mapKey(row, 'Locator');
+                const loc = rawLocator || 'UNKNOWN';
+                const item = mapKey(row, 'Item Code');
+                const lpn = mapKey(row, 'LPN NO');
+                const subinv = mapKey(row, 'Subinv');
+                const subinvUpper = String(subinv || '').trim().toUpperCase();
+                const supplierLot = mapKey(row, 'Supplier LOT');
+                const lotNum = mapKey(row, 'LOT NUM');
+                const marsBatch = mapKey(row, 'Mars Batch');
+                const batchKey = supplierLot || lotNum || marsBatch;
+                const expRaw = mapKey(row, 'EXP Date');
+                const expDateObj = parseRobustDate(expRaw);
+                const puomQtyRaw = mapKey(row, 'PUOM QTY');
+                const csQtyRaw = mapKey(row, 'CS QTY');
+                const puomQty = coerceFloat(puomQtyRaw);
+                const csQty = coerceFloat(csQtyRaw);
+                const locGroupKey = locationKey(org, loc);
+                const lpnGroupKey = lpn ? buildCompositeKey(org, lpn) : '';
+                const stats = locStats.get(locGroupKey) || makeLocStats();
+                const lpnGroup = lpnGroupKey ? (lpnStats.get(lpnGroupKey) || makeLpnStats()) : makeLpnStats();
 
                 const locKey = toMatchKey(loc);
-                if (locMap.has(locKey)) {
-                    masterLoc = locMap.get(locKey);
-                    const locHeaders = Object.keys(state.locData[0]);
-                    const localStorageKeyLoc = findColByAliases(locHeaders, STOR_COL_ALIASES);
-                    rawStorageType = String(
-                        masterLoc['Storage'] || masterLoc['Storage Type'] ||
-                        (localStorageKeyLoc ? masterLoc[localStorageKeyLoc] : '') || ''
-                    ).trim();
-                    if (!rawStorageType) rawStorageType = 'Unspecified';
-
-                    const localZoneKeyLoc = findColByAliases(locHeaders, ZONE_COL_ALIASES);
-                    const rawZone = String(
-                        masterLoc['Zone Name'] || masterLoc['Zone'] ||
-                        (localZoneKeyLoc ? masterLoc[localZoneKeyLoc] : '') || ''
-                    ).trim();
-                    zone = rawZone ? (state.zoneMapping.get(rawZone.toLowerCase()) || rawZone) : 'Unassigned';
-                } else {
-                    rawStorageType = parseStorageTypeFromLocator(loc);
-                    zone = 'Unassigned';
-                }
-                
-                const storageCategory = determineStorageCategory(rawStorageType);
+                const exactMasterLoc = locMapByOrg.get(locationKey(org, loc));
+                const fallbackMasterLoc = locMapFallback.get(locKey);
+                const masterLoc = exactMasterLoc || fallbackMasterLoc || null;
+                const masterFound = Boolean(masterLoc);
+                const masterOrg = masterLoc ? getFirstNonBlankValue(masterLoc, ['Warehouse Name', 'Warehouse', 'Org Code'], whKeyLoc) : '';
+                const rawStorageType = masterLoc
+                    ? (getFirstNonBlankValue(masterLoc, ['Storage', 'Storage Type'], storageKeyLoc) || 'Unspecified')
+                    : parseStorageTypeFromLocator(loc);
+                const stTypeString = String(rawStorageType || '').trim();
+                const storageCategory = determineStorageCategory(stTypeString);
                 activeStorageTypesSet.add(storageCategory);
-                
-                if (masterLoc['Capacity']) {
-                    capacity = parseInt(masterLoc['Capacity'], 10);
-                } else if (masterLoc['Tunnel Capacity']) {
-                    capacity = parseInt(masterLoc['Tunnel Capacity'], 10);
-                } else if (storageCategory === 'Radio Shuttle') {
-                    capacity = 10; 
-                }
 
-                const rawLvl = masterLoc['Level'] || masterLoc['level'] || coords.level;
-                const level = String(rawLvl).trim().padStart(2, '0');
+                const rawZone = masterLoc ? getFirstNonBlankValue(masterLoc, ['Zone Name', 'Zone'], zoneKeyLoc) : '';
+                const zone = rawZone ? (state.zoneMapping.get(rawZone.toLowerCase()) || rawZone) : 'Unassigned';
+                const coords = parseAisleLevelFromLocator(loc);
+                const rawLevel = masterLoc ? getFirstNonBlankValue(masterLoc, ['Level', 'level']) : '';
+                const level = String(rawLevel || coords.level).trim().padStart(2, '0');
+
+                const rawCapacity = masterLoc ? getFirstNonBlankValue(masterLoc, ['Capacity', 'Tunnel Capacity'], capacityKeyLoc) : '';
+                const parsedCapacity = rawCapacity === '' ? NaN : Number(String(rawCapacity).replace(/,/g, ''));
+                let capacity = 1;
+                if (Number.isFinite(parsedCapacity) && parsedCapacity > 0) capacity = Math.floor(parsedCapacity);
+                else if (storageCategory === 'Radio Shuttle') capacity = 10;
 
                 const isStandardStorage = ['Normal Physical Storage', 'Radio Shuttle', 'Bins', 'Shelves', 'POS'].includes(storageCategory);
                 const isNonShuttleStandard = ['Normal Physical Storage', 'Bins', 'Shelves', 'POS'].includes(storageCategory);
-                const isLpnDuplicate = duplicateLPNsSet.has(mapKey(row, 'LPN NO'));
-                const isOvercapacity = stats.lpns.size > capacity;
-                
-                const f_item = isStandardStorage && stats.items.size > 1 ? "Multiple Item/Loc" : "OK";
-                const f_lpn = isNonShuttleStandard && stats.lpns.size > 1 ? "Multiple LPN/Loc" : "OK";
-                const f_shuttle = storageCategory === 'Radio Shuttle' && stats.lpns.size === 1 ? "Single LPN in Shuttle" : "OK";
-                const f_exp = isStandardStorage && stats.exps.size > 1 ? "Multiple Exp/Loc" : "OK";
-                const f_batch = isStandardStorage && stats.batches.size > 1 ? "Multiple Batch/Loc" : "OK";
-                
-                const stTypeString = String(rawStorageType).trim();
-                const f_track = TRACKING_TYPES.includes(stTypeString) ? "Track" : "OK";
-                let actionLabel = "Matching — No Action Required";
-                let actionColor = COLORS.GREEN;
-                const subinv = String(mapKey(row, 'Subinv')).toUpperCase();
-                
-                // ── LOGIC FIX: Re-ordered action priority to ensure LPN duplication
-                // overrides 'Unsellable/Dummy' for ghost records when exclusion is cleared.
-                if (isBulkLocator(loc)) {
-                    actionLabel = "Bulk Location — Excluded";
-                    actionColor = COLORS.GREY;
-                } else if (isLpnDuplicate) {
-                    actionLabel = "LPN Duplication Alert";
-                    actionColor = COLORS.RED;
-                    flagsCount.duplicates++;
-                } else if (subinv !== 'SELLABLE' && subinv !== '') {
-                    actionLabel = "Unsellable / Dummy";
-                    actionColor = COLORS.GREY;
-                } else if (loc.toUpperCase().includes('DUMMY') || loc.toUpperCase().includes('DZ') || storageCategory === 'Dummy Location Bucket') {
-                    actionLabel = "Unsellable / Dummy";
-                    actionColor = COLORS.GREY;
-                } else if (isOvercapacity) {
-                    actionLabel = "Overcapacity — Locator Overfilled";
-                    actionColor = COLORS.RED;
-                    flagsCount.overcapacity++;
-                } else if (f_track === "Track") {
-                    actionLabel = "Tracking — Verify & Action";
-                    actionColor = COLORS.RED;
-                    flagsCount.track++;
-                } else if (f_item !== "OK") {
-                    actionLabel = "Multiple Items in Location";
-                    actionColor = COLORS.RED;
-                    flagsCount.multiItem++;
-                } else if (f_exp !== "OK") {
-                    actionLabel = "Multiple Expiry Dates in Location";
-                    actionColor = COLORS.RED;
-                    flagsCount.multiExp++;
-                } else if (f_lpn !== "OK") {
-                    actionLabel = "Multiple LPNs in Location";
-                    actionColor = COLORS.ORANGE;
-                    flagsCount.multiLpn++;
-                } else if (f_batch !== "OK") {
-                    actionLabel = "Multiple Batches in Location";
-                    actionColor = COLORS.ORANGE;
-                    flagsCount.multiBatch++;
-                } else if (f_shuttle !== "OK") {
-                    actionLabel = "Single LPN in Shuttle";
-                    actionColor = COLORS.YELLOW;
-                    flagsCount.shuttleSingle++;
+                const isBulkExcluded = isBulkLocator(loc);
+                const isTracking = isTrackingStorageType(stTypeString);
+                const isExplicitNonSellable = isExplicitNonSellableStorage(stTypeString, loc);
+                const isUnsellableSubinventory = subinvUpper !== '' && subinvUpper !== 'SELLABLE';
+                const isUnmappedStorage = masterFound && !isApprovedStorageType(stTypeString) && !isExplicitNonSellable;
+                const isMissingMasterLocation = hasLocationMaster && !masterFound;
+                const isOrgMismatch = masterFound && Boolean(masterOrg) && Boolean(rawOrg) && toMatchKey(masterOrg) !== toMatchKey(rawOrg);
+                const isInvalidCapacity = masterFound && isStandardStorage && (
+                    storageCategory === 'Radio Shuttle'
+                        ? (!Number.isFinite(parsedCapacity) || parsedCapacity <= 0)
+                        : (rawCapacity !== '' && (!Number.isFinite(parsedCapacity) || parsedCapacity <= 0))
+                );
+                const isOvercapacity = isStandardStorage && stats.lpns.size > capacity;
+                const isMultiItem = isStandardStorage && stats.items.size > 1;
+                const isMultiLpn = isNonShuttleStandard && stats.lpns.size > 1;
+                const isSingleLpnShuttle = storageCategory === 'Radio Shuttle' && stats.lpns.size === 1;
+                const isMultiExp = isStandardStorage && stats.exps.size > 1;
+                const isMultiBatch = isStandardStorage && stats.batches.size > 1;
+                const isMultiDivision = isStandardStorage && stats.divisions.size > 1;
+                const isMultiSubinventory = isStandardStorage && stats.subinvs.size > 1;
+                const isLpnDuplicate = lpnGroup.locations.size > 1;
+                const isLpnMultiSku = lpnGroup.items.size > 1;
+                const isLpnMultiLotExpiry = lpnGroup.lots.size > 1 || lpnGroup.exps.size > 1;
+                const batchGroupKey = (batchKey && item && rawDivision) ? buildCompositeKey(org, rawDivision, item, batchKey) : '';
+                const isBatchExpiryConflict = batchGroupKey && (batchExpiryStats.get(batchGroupKey) || new Set()).size > 1;
+                const duplicateRecordKey = buildCompositeKey(rawOrg, rawDivision, loc, lpn, item, batchKey, expRaw, String(puomQty), String(csQty));
+                const isDuplicateRecord = (duplicateRecordCounts.get(duplicateRecordKey) || 0) > 1;
+                const hasMissingMandatory = !rawOrg || !rawDivision || !rawLocator || !item || !lpn ||
+                    (!hasSohColumn('PUOM QTY') && !hasSohColumn('CS QTY')) ||
+                    (hasSohColumn('PUOM QTY') && puomQtyRaw === '') ||
+                    (hasSohColumn('CS QTY') && csQtyRaw === '');
+                const hasZeroOrNegativeQty =
+                    (hasSohColumn('PUOM QTY') && puomQtyRaw !== '' && puomQty <= 0) ||
+                    (hasSohColumn('CS QTY') && csQtyRaw !== '' && csQty <= 0);
+                const hasStatusConflict = subinvUpper === 'SELLABLE' && (
+                    isBlockingInventoryStatus(mapKey(row, 'LOT STATUS')) ||
+                    isBlockingInventoryStatus(mapKey(row, 'LPN STATUS')) ||
+                    isBlockingInventoryStatus(mapKey(row, 'Batch Status'))
+                );
+                const isExpiredSellable = subinvUpper === 'SELLABLE' && expDateObj && expDateObj < startOfToday;
+
+                let issues = [];
+                let actionLabel = 'Matching — No Action Required';
+                if (isBulkExcluded) {
+                    actionLabel = 'Bulk Location — Excluded';
+                    issues = [actionLabel];
+                } else if (isUnsellableSubinventory || (isExplicitNonSellable && !isTracking)) {
+                    actionLabel = 'Unsellable / Dummy';
+                    issues = [actionLabel];
+                } else if (isTracking) {
+                    actionLabel = 'Tracking — Verify & Action';
+                    issues = [actionLabel];
+                } else {
+                    if (hasMissingMandatory) issues.push('Missing Mandatory Inventory Data');
+                    if (isMissingMasterLocation) issues.push('Location Missing from Master');
+                    if (isOrgMismatch) issues.push('Org Mismatch with Location Master');
+                    if (isUnmappedStorage) issues.push('Unmapped Storage Type / Classification');
+                    if (hasStatusConflict) issues.push('Status Conflict — Sellable Stock');
+                    if (isExpiredSellable) issues.push('Expired Sellable Stock');
+                    if (isLpnDuplicate) issues.push('LPN Duplication Alert');
+                    if (isLpnMultiSku) issues.push('Same LPN — Multiple SKUs');
+                    if (isLpnMultiLotExpiry) issues.push('Same LPN — Multiple Lots / Expiry');
+                    if (isBatchExpiryConflict) issues.push('Same Batch — Different Expiry');
+                    if (isDuplicateRecord) issues.push('Duplicate Inventory Record');
+                    if (isOvercapacity) issues.push('Overcapacity — Locator Overfilled');
+                    if (isMultiDivision) issues.push('Multiple Divisions in Location');
+                    if (isMultiSubinventory) issues.push('Multiple Subinventories in Location');
+                    if (isMultiItem) issues.push('Multiple Items in Location');
+                    if (isMultiExp) issues.push('Multiple Expiry Dates in Location');
+                    if (isMultiLpn) issues.push('Multiple LPNs in Location');
+                    if (isMultiBatch) issues.push('Multiple Batches in Location');
+                    if (isInvalidCapacity) issues.push('Missing / Invalid Location Capacity');
+                    if (hasZeroOrNegativeQty) issues.push('Zero / Negative Inventory Quantity');
+                    if (isSingleLpnShuttle) issues.push('Single LPN in Shuttle');
+
+                    if (issues.length > 0) {
+                        actionLabel = ACTION_PRIORITY.find(action => issues.includes(action)) || issues[0];
+                    } else {
+                        issues = ['Matching — No Action Required'];
+                    }
                 }
-                
+
+                const actionColor = getActionColor(actionLabel);
+                issues.forEach(issue => {
+                    const flagKey = ACTION_META[issue] && ACTION_META[issue].flagKey;
+                    if (flagKey && Object.prototype.hasOwnProperty.call(flagsCount, flagKey)) flagsCount[flagKey]++;
+                });
                 actionCounts[actionLabel] = (actionCounts[actionLabel] || 0) + 1;
+
                 processed.push({
                     _id: idx,
-                    'Org Code': mapKey(row, 'Org Code') || 'UNKNOWN',
+                    'Org Code': org,
                     'Division': division,
                     'Supplier': mapKey(row, 'Supplier') || 'UNKNOWN',
                     'Item Category': mapKey(row, 'Item Category') || 'UNKNOWN',
-                    'Item Code': mapKey(row, 'Item Code') || 'UNKNOWN',
+                    'Item Code': item || 'UNKNOWN',
                     'Description': mapKey(row, 'Description') || 'UNKNOWN',
                     'PACK': mapKey(row, 'PACK') || 'UNKNOWN',
-                    'Subinv': mapKey(row, 'Subinv') || 'UNKNOWN',
+                    'Subinv': subinv || 'UNKNOWN',
                     'Locator': loc,
-                    'LOT NUM': mapKey(row, 'LOT NUM') || '',
-                    'LPN NO': mapKey(row, 'LPN NO') || '',
-                    'EXP Date': mapKey(row, 'EXP Date') || '',
+                    'LOC STATUS': mapKey(row, 'LOC STATUS') || '',
+                    'LOT NUM': lotNum || '',
+                    'LOT STATUS': mapKey(row, 'LOT STATUS') || '',
+                    'LPN NO': lpn || '',
+                    'LPN STATUS': mapKey(row, 'LPN STATUS') || '',
+                    'EXP Date': expRaw || '',
                     'PUOM': mapKey(row, 'PUOM') || 'CS',
-                    'PUOM QTY': coerceFloat(mapKey(row, 'PUOM QTY')),
-                    'CS QTY': coerceFloat(mapKey(row, 'CS QTY')),
+                    'PUOM QTY': puomQty,
+                    'CS QTY': csQty,
                     'PUOM CST': coerceFloat(mapKey(row, 'PUOM CST')),
+                    'Source Type': mapKey(row, 'Source Type') || '',
+                    'Source No': mapKey(row, 'Source No') || '',
+                    'Supplier LOT': supplierLot || '',
+                    'Mars Batch': marsBatch || '',
+                    'Batch Status': mapKey(row, 'Batch Status') || '',
+                    'Cross Ref.': mapKey(row, 'Cross Ref.') || '',
                     'Storage Type': stTypeString,
                     '_storageCategory': storageCategory,
                     'Zone': zone,
                     'Aisle': coords.aisle,
                     'Level': level,
                     'Capacity': capacity,
-                    _stats: { items: stats.items.size, lpns: stats.lpns.size, exps: stats.exps.size, batches: stats.batches.size },
-                    _action: actionLabel,
-                    _color: actionColor,
-                    _expDateObj: parseRobustDate(mapKey(row, 'EXP Date'))
+                    '_stats': {
+                        items: stats.items.size, lpns: stats.lpns.size, exps: stats.exps.size,
+                        batches: stats.batches.size, divisions: stats.divisions.size, subinvs: stats.subinvs.size
+                    },
+                    '_issues': issues,
+                    '_issueSummary': issues.join(' • '),
+                    '_action': actionLabel,
+                    '_color': actionColor,
+                    '_expDateObj': expDateObj,
+                    '_locMasterFound': masterFound,
+                    '_locMasterOrg': masterOrg
                 });
             });
 
@@ -1160,13 +1365,12 @@
             state.actionSummary = ACTION_LABELS.map(key => ({
                 name: key,
                 value: actionCounts[key] || 0,
-                color: processed.find(p => p._action === key)?._color || COLORS.GREY
+                color: getActionColor(key)
             }));
-
             state.kpis = {
                 totalRows: processed.length,
                 flagsCount,
-                excludedCount: processed.filter(r => r._action === "Bulk Location — Excluded").length
+                excludedCount: processed.filter(r => r._action === 'Bulk Location — Excluded').length
             };
 
             const syncFilter = (uniqueList, filterList) => {
@@ -1214,12 +1418,17 @@
         function getFilteredData() {
             const globalFilter = getGloballyFilteredData();
             return globalFilter.filter(row => {
-                if (state.filters.actions.length > 0 && !state.filters.actions.includes(row._action)) return false;
+                const rowIssues = Array.isArray(row._issues) ? row._issues : [row._action];
+                if (state.filters.actions.length > 0 && !rowIssues.some(issue => state.filters.actions.includes(issue))) return false;
                 for (const col in state.filters.headerFilters) {
                     const selectedVals = state.filters.headerFilters[col];
                     if (selectedVals && selectedVals.length > 0) {
-                        const val = String(row[col] || '').trim();
-                        if (!selectedVals.includes(val)) return false;
+                        if (col === '_action') {
+                            if (!rowIssues.some(issue => selectedVals.includes(issue))) return false;
+                        } else {
+                            const val = String(row[col] || '').trim();
+                            if (!selectedVals.includes(val)) return false;
+                        }
                     }
                 }
                 return true;
@@ -1765,27 +1974,8 @@
                                     <h3 class="font-bold text-white mb-4 flex items-center gap-2 shrink-0 animate-fadeIn">
                                         ${getSVGIcon('alert-triangle', 'text-slate-400 w-4.5 h-4.5')} Action Required Flags
                                     </h3>
-                                    <div class="space-y-2 flex-1 overflow-y-auto pr-1 custom-scrollbar font-mono">
-                                        <div class="flex justify-between items-center p-2.5 bg-red-950/20 border border-red-500/20 rounded-xl animate-fadeIn font-mono">
-                                            <span class="text-red-400 text-xs font-medium">Overcapacity / Overfill</span>
-                                            <span id="flag-cap" class="text-xs font-bold bg-red-500/10 px-2 py-0.5 rounded text-red-400 font-mono">0</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2.5 bg-red-950/20 border border-red-500/20 rounded-xl animate-fadeIn font-mono">
-                                            <span class="text-red-400 text-xs font-medium">LPN Duplication Alerts</span>
-                                            <span id="flag-dup" class="text-xs font-bold bg-red-500/10 px-2 py-0.5 rounded text-red-400 font-mono">0</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2.5 bg-red-950/20 border border-red-500/20 rounded-xl animate-fadeIn font-mono">
-                                            <span class="text-red-400 text-xs font-medium">Multiple Items / Loc</span>
-                                            <span id="flag-item" class="text-xs font-bold bg-red-500/10 px-2 py-0.5 rounded text-red-400 font-mono">0</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2.5 bg-orange-950/20 border border-orange-500/20 rounded-xl animate-fadeIn font-mono">
-                                            <span class="text-orange-400 text-xs font-medium">Multiple LPNs / Loc</span>
-                                            <span id="flag-lpn" class="text-xs font-bold bg-orange-500/10 px-2 py-0.5 rounded text-orange-400 font-mono">0</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2.5 bg-yellow-950/20 border border-yellow-500/20 rounded-xl animate-fadeIn font-mono">
-                                            <span class="text-yellow-400 text-xs font-medium">Single LPN in Shuttle</span>
-                                            <span id="flag-shuttle" class="text-xs font-bold bg-yellow-500/10 px-2 py-0.5 rounded text-yellow-400 font-mono">0</span>
-                                        </div>
+                                    <div class="space-y-2 flex-1 overflow-y-auto pr-1 custom-scrollbar font-mono max-h-80">
+                                        ${getFlagCardsHTML()}
                                     </div>
                                 </div>
                             </div>
@@ -2233,6 +2423,20 @@
         }
         window.toggleHeaderFilterVal = toggleHeaderFilterVal;
 
+
+        function filterToIssue(actionName) {
+            state.filters.headerFilters._action = [actionName];
+            const dropdown = document.getElementById('filter-dropdown-_action');
+            if (dropdown) {
+                dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                    cb.checked = cb.value === actionName;
+                });
+            }
+            state.currentPage = 1;
+            updateTableAndCharts();
+        }
+        window.filterToIssue = filterToIssue;
+
         function clearHeaderFilter(event, colKey) {
             event.stopPropagation();
             state.filters.headerFilters[colKey] = [];
@@ -2319,12 +2523,17 @@
                 const pageData = filtered.slice((state.currentPage - 1) * state.pageSize, state.currentPage * state.pageSize);
                 tbody.innerHTML = pageData.map(row => `
                     <tr class="hover:bg-slate-800/40 transition-colors animate-fadeIn font-mono text-xs">
-                        <td class="p-3">
+                        <td class="p-3 min-w-[260px]">
                             <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border"
                                  style="background-color: ${row._color}15; border-color: ${row._color}30; color: ${row._color}">
                                 <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${row._color}"></span>
                                 ${row._action}
                             </div>
+                            ${(row._issues || []).filter(issue => issue !== row._action && issue !== 'Matching — No Action Required').length > 0 ? `
+                                <div class="mt-1 text-[10px] leading-relaxed text-slate-400 max-w-[330px] whitespace-normal" title="${(row._issues || []).join(' • ')}">
+                                    ${(row._issues || []).filter(issue => issue !== row._action && issue !== 'Matching — No Action Required').join(' • ')}
+                                </div>
+                            ` : ''}
                         </td>
                         <td class="p-3 text-slate-300 font-bold">${row['Locator'] || ''}</td>
                         <td class="p-3 text-slate-400">${row['Division'] || ''}</td>
@@ -2441,7 +2650,7 @@
                 expPing.style.display = level01Exp15 > 0 ? 'block' : 'none';
             }
 
-            const mixStoragePctCalculated = activeLocators.size > 0 ? ((globallyFiltered.filter(r => r._action === "Multiple Items in Location").length / activeLocators.size) * 100).toFixed(1) : 0;
+            const mixStoragePctCalculated = activeLocators.size > 0 ? ((globallyFiltered.filter(r => (r._issues || []).includes('Multiple Items in Location')).length / activeLocators.size) * 100).toFixed(1) : 0;
             const densityRatioCalculated = activeLocators.size > 0 ? (activeLpns.size / activeLocators.size).toFixed(2) : 0;
             const excludedEfficiencyCalculated = globallyFiltered.filter(r => r._action === "Bulk Location — Excluded").length;
             setTxt('diag-mix', `${mixStoragePctCalculated}%`);
@@ -2524,9 +2733,8 @@
             
             setTxt('advisories', advisoryListHTML);
 
-            const flagIds = ['flag-cap', 'flag-dup', 'flag-item', 'flag-lpn', 'flag-shuttle'];
-            const flagKeys = ['overcapacity', 'duplicates', 'multiItem', 'multiLpn', 'shuttleSingle'];
-            flagIds.forEach((id, i) => setTxt(id, (state.kpis.flagsCount && globallyFiltered.length > 0) ? state.kpis.flagsCount[flagKeys[i]] : 0));
+            const filteredFlagCounts = getIssueCounts(globallyFiltered);
+            FLAG_CARD_CONFIG.forEach(flag => setTxt(`flag-${flag.key}`, filteredFlagCounts[flag.key] || 0));
 
             const level01TableBody = document.getElementById('tbody-level01-expiries');
             if (level01TableBody) {
@@ -2597,16 +2805,18 @@
                 });
                 globallyFiltered.forEach(row => {
                     const org = row['Org Code'];
-                    const act = row._action;
-                    if (summariesFiltered[org] && summariesFiltered[org][act]) {
-                        summariesFiltered[org][act].count++;
-                    }
+                    const issues = Array.isArray(row._issues) ? row._issues : [row._action];
+                    issues.forEach(act => {
+                        if (summariesFiltered[org] && summariesFiltered[org][act]) {
+                            summariesFiltered[org][act].count++;
+                        }
+                    });
                 });
                 matrixTableBody.innerHTML = state.uniqueOrgs.flatMap(org => 
                     ACTION_LABELS.map(act => {
                         const stat = summariesFiltered[org]?.[act] || { count: 0 };
                         if (stat.count === 0) return '';
-                        const color = state.processedData.find(p => p._action === act)?._color || COLORS.GREY;
+                        const color = getActionColor(act);
                         return `
                             <tr class="hover:bg-slate-800/40 transition-colors font-mono">
                                 <td class="py-2.5 font-bold text-white">${org}</td>
