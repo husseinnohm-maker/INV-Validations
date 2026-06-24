@@ -70,7 +70,13 @@
         const ZONE_COL_ALIASES  = ['zone name', 'zone_name', 'zone'];
         const CAPACITY_COL_ALIASES = ['capacity', 'tunnel capacity', 'location capacity', 'max lpn', 'max lpns', 'pallet capacity'];
 
+        // General normalization is used for values such as Org, Division, SKU, Lot and LPN.
+        // Do NOT use it for locators: punctuation can be structurally meaningful in WMS location codes.
         const toMatchKey = (val) => String(val || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
+
+        // Locator-specific key: case-insensitive and trimmed, while preserving all punctuation.
+        // Example: DJ01.12L02.A and DJ0112L02A remain two different locations.
+        const toLocationKey = (val) => String(val || '').trim().toUpperCase();
 
         function findColByAliases(headers, aliases) {
             for (const alias of aliases) {
@@ -358,6 +364,28 @@
             return parts.map(part => toMatchKey(part) || '∅').join('|');
         }
 
+        // Use this for all validations that compare inventory by physical location.
+        // Org remains normalized, but the locator itself retains meaningful separators.
+        function buildLocationKey(org, locator) {
+            return `${toMatchKey(org) || '∅'}|${toLocationKey(locator) || '∅'}`;
+        }
+
+        // Duplicate-record validation also needs an exact locator key; otherwise two distinct
+        // locations that differ only by punctuation could be incorrectly treated as duplicates.
+        function buildInventoryRecordKey(org, division, locator, lpn, item, batch, expiry, puomQty, csQty) {
+            return [
+                toMatchKey(org) || '∅',
+                toMatchKey(division) || '∅',
+                toLocationKey(locator) || '∅',
+                toMatchKey(lpn) || '∅',
+                toMatchKey(item) || '∅',
+                toMatchKey(batch) || '∅',
+                toMatchKey(expiry) || '∅',
+                toMatchKey(puomQty) || '∅',
+                toMatchKey(csQty) || '∅'
+            ].join('|');
+        }
+
         function isBlockingInventoryStatus(value) {
             const status = String(value || '').trim().toUpperCase();
             if (!status) return false;
@@ -475,7 +503,7 @@
 
         function isBulkLocator(loc) {
             if (!loc) return false;
-            const locKey = toMatchKey(loc);
+            const locKey = toLocationKey(loc);
             if (state.bulkExclusionKeys && state.bulkExclusionKeys.has(locKey)) return true;
 
             const uLoc = String(loc).trim().toUpperCase();
@@ -574,7 +602,7 @@
                     const locRaw = getFirstNonBlankValue(locRow, ['Location', 'Locator'], locKeyLoc);
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw);
+                    const locKey = toLocationKey(locRaw);
                     locMatchKeyToRaw.set(locKey, locRaw);
 
                     const rawStorageVal = getFirstNonBlankValue(locRow, ['Storage', 'Storage Type'], storageKeyLoc);
@@ -594,7 +622,7 @@
                         ? String(row[userHeader]).trim()
                         : '';
                     if (!locRaw) return;
-                    const locKey = toMatchKey(locRaw);
+                    const locKey = toLocationKey(locRaw);
                     if (!locMatchKeyToRaw.has(locKey) && isExplicitNonSellableStorage('', locRaw)) {
                         state.bulkExclusionKeys.add(locKey);
                         if (!state.bulkLocations.includes(locRaw)) state.bulkLocations.push(locRaw);
@@ -784,7 +812,7 @@
             state.bulkLocations.forEach(loc => {
                 const raw = String(loc || '').trim();
                 if (raw && !raw.includes('*')) {
-                    const key = toMatchKey(raw);
+                    const key = toLocationKey(raw);
                     if (key) state.bulkExclusionKeys.add(key);
                 }
             });
@@ -1040,7 +1068,7 @@
             };
             const hasSohColumn = (key) => Boolean(state.columnMapping[key]);
             const hasLocationMaster = Boolean(state.locData && state.locData.length > 0);
-            const locationKey = (org, loc) => buildCompositeKey(org, loc);
+            const locationKey = (org, loc) => buildLocationKey(org, loc);
 
             const locMapByOrg = new Map();
             const locMapFallback = new Map();
@@ -1070,7 +1098,7 @@
                     const locRaw = getFirstNonBlankValue(locRow, ['Location', 'Locator'], locKeyLoc);
                     if (!locRaw) return;
 
-                    const locKey = toMatchKey(locRaw);
+                    const locKey = toLocationKey(locRaw);
                     const masterOrg = getFirstNonBlankValue(locRow, ['Warehouse Name', 'Warehouse', 'Org Code'], whKeyLoc);
                     const rawStorageVal = getFirstNonBlankValue(locRow, ['Storage', 'Storage Type'], storageKeyLoc);
                     const category = determineStorageCategory(rawStorageVal);
@@ -1141,7 +1169,7 @@
                     if (item) lpnGroup.items.add(toMatchKey(item));
                     if (batchKey) lpnGroup.lots.add(toMatchKey(batchKey));
                     if (exp) lpnGroup.exps.add(String(exp).trim());
-                    lpnGroup.locations.add(toMatchKey(loc));
+                    lpnGroup.locations.add(toLocationKey(loc));
                 }
 
                 if (batchKey && item && divisionRaw) {
@@ -1150,7 +1178,7 @@
                     if (exp) batchExpiryStats.get(batchGroupKey).add(String(exp).trim());
                 }
 
-                const duplicateRecordKey = buildCompositeKey(
+                const duplicateRecordKey = buildInventoryRecordKey(
                     orgRaw, divisionRaw, loc, lpn, item, batchKey, exp,
                     String(coerceFloat(mapKey(row, 'PUOM QTY'))), String(coerceFloat(mapKey(row, 'CS QTY')))
                 );
@@ -1187,7 +1215,7 @@
                 const stats = locStats.get(locGroupKey) || makeLocStats();
                 const lpnGroup = lpnGroupKey ? (lpnStats.get(lpnGroupKey) || makeLpnStats()) : makeLpnStats();
 
-                const locKey = toMatchKey(loc);
+                const locKey = toLocationKey(loc);
                 const exactMasterLoc = locMapByOrg.get(locationKey(org, loc));
                 const fallbackMasterLoc = locMapFallback.get(locKey);
                 const masterLoc = exactMasterLoc || fallbackMasterLoc || null;
@@ -1239,15 +1267,16 @@
                 const isLpnMultiLotExpiry = lpnGroup.lots.size > 1 || lpnGroup.exps.size > 1;
                 const batchGroupKey = (batchKey && item && rawDivision) ? buildCompositeKey(org, rawDivision, item, batchKey) : '';
                 const isBatchExpiryConflict = batchGroupKey && (batchExpiryStats.get(batchGroupKey) || new Set()).size > 1;
-                const duplicateRecordKey = buildCompositeKey(rawOrg, rawDivision, loc, lpn, item, batchKey, expRaw, String(puomQty), String(csQty));
+                const duplicateRecordKey = buildInventoryRecordKey(rawOrg, rawDivision, loc, lpn, item, batchKey, expRaw, String(puomQty), String(csQty));
                 const isDuplicateRecord = (duplicateRecordCounts.get(duplicateRecordKey) || 0) > 1;
                 const hasMissingMandatory = !rawOrg || !rawDivision || !rawLocator || !item || !lpn ||
                     (!hasSohColumn('PUOM QTY') && !hasSohColumn('CS QTY')) ||
                     (hasSohColumn('PUOM QTY') && puomQtyRaw === '') ||
                     (hasSohColumn('CS QTY') && csQtyRaw === '');
+                // Quantity integrity is based only on the primary on-hand quantity column.
+                // CS QTY may legitimately be zero for conversion / UOM scenarios and is not used here.
                 const hasZeroOrNegativeQty =
-                    (hasSohColumn('PUOM QTY') && puomQtyRaw !== '' && puomQty <= 0) ||
-                    (hasSohColumn('CS QTY') && csQtyRaw !== '' && csQty <= 0);
+                    hasSohColumn('PUOM QTY') && puomQtyRaw !== '' && puomQty <= 0;
                 const hasStatusConflict = subinvUpper === 'SELLABLE' && (
                     isBlockingInventoryStatus(mapKey(row, 'LOT STATUS')) ||
                     isBlockingInventoryStatus(mapKey(row, 'LPN STATUS')) ||
