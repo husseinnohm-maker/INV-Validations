@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
     <style>
@@ -606,8 +608,6 @@
                     locMatchKeyToRaw.set(locKey, locRaw);
 
                     const rawStorageVal = getFirstNonBlankValue(locRow, ['Storage', 'Storage Type'], storageKeyLoc);
-                    // Only known non-sellable / tracking coordinates are auto-excluded. Unknown
-                    // classifications remain active and are surfaced by the Unmapped Storage validation.
                     if (isExplicitNonSellableStorage(rawStorageVal, locRaw)) {
                         state.bulkExclusionKeys.add(locKey);
                         if (!state.bulkLocations.includes(locRaw)) state.bulkLocations.push(locRaw);
@@ -675,7 +675,7 @@
 
             const dupLPN = 'LPN-DUPLICATE-TRK';
             soh.push(createRow('A10.01L01.A', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' }));
-            soh.push(createRow('DZ.00.00', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' })); // Ghost in dummy location to test logic
+            soh.push(createRow('DZ.00.00', { 'LPN NO': dupLPN, 'Item Code': 'ITM-DUP', 'EXP Date': '2026-12-01' })); 
 
             for (let i = soh.length; i < rowCount; i++) {
                 const loc = locators[Math.floor(Math.random() * locators.length)];
@@ -859,25 +859,113 @@
         }
         window.clearAllFilters = clearAllFilters;
 
-        function csvValue(row, header) {
+        function getExportValue(row, header) {
             if (header === 'Primary Action') return row._action || '';
             if (header === 'All Validation Flags') return (row._issues || []).join(' • ');
-            return row[header] || '';
+            return row[header] !== undefined && row[header] !== null ? row[header] : '';
         }
 
-        function buildCsvDownload(rows, headers, filename) {
-            const csvContent = 'data:text/csv;charset=utf-8,'
-                + headers.join(',') + '\n'
-                + rows.map(row => headers.map(header => `"${String(csvValue(row, header)).replace(/"/g, '""')}"`).join(',')).join('\n');
-            const link = document.createElement('a');
-            link.setAttribute('href', encodeURI(csvContent));
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        async function createAndSaveStyledExcel(sheetsData, filename) {
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = 'WMS Dashboard Engine';
+            workbook.created = new Date();
+
+            sheetsData.forEach(sheetInfo => {
+                const sheet = workbook.addWorksheet(sheetInfo.name, {
+                    views: [{ state: 'frozen', ySplit: 1 }] // Freeze header row
+                });
+
+                // Establish auto-fit column widths
+                sheet.columns = sheetInfo.headers.map(h => ({
+                    header: h,
+                    key: h,
+                    width: Math.max(h.length + 6, 18) 
+                }));
+
+                sheet.addRows(sheetInfo.rows);
+
+                // Managerial Header Styling
+                const headerRow = sheet.getRow(1);
+                headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12, name: 'Calibri' };
+                headerRow.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FF0F172A' } // Deep Slate
+                };
+                headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+                // Professional Data Row Styling (Zebra Striping, Color Coding, Borders)
+                sheet.eachRow((row, rowNumber) => {
+                    row.eachCell((cell, colNumber) => {
+                        cell.border = {
+                            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                            right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+                        };
+
+                        if (rowNumber > 1) {
+                            // Zebra Backgrounds
+                            if (rowNumber % 2 === 0) {
+                                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; // Light Slate
+                            } else {
+                                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }; // White
+                            }
+
+                            const header = sheet.getColumn(colNumber).header;
+                            const val = cell.value;
+                            
+                            // Smart Action Formatting
+                            if ((header === 'Primary Action' || header === 'Validation Flag') && val) {
+                                const colorHex = getActionColor(val);
+                                if (colorHex && colorHex !== COLORS.GREY) {
+                                    cell.font = { color: { argb: 'FF' + colorHex.replace('#', '').toUpperCase() }, bold: true };
+                                }
+                            }
+                            
+                            // Red Highlighting for Expired items
+                            if (header === 'EXP Date' && val) {
+                                const expDate = new Date(val);
+                                if (!isNaN(expDate) && expDate < new Date()) {
+                                    cell.font = { color: { argb: 'FFEF4444' }, bold: true }; // Red Text
+                                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } }; // Light Red BG
+                                }
+                            }
+                            
+                            // Number formatting for computation-friendly excel files
+                            if (['PUOM QTY', 'CS QTY', 'PUOM CST', 'Capacity'].includes(header)) {
+                                cell.alignment = { horizontal: 'right', vertical: 'middle' };
+                                if (typeof cell.value === 'string' && !isNaN(Number(cell.value)) && cell.value.trim() !== '') {
+                                    cell.value = Number(cell.value); 
+                                }
+                            } else {
+                                cell.alignment = { horizontal: 'left', vertical: 'middle' };
+                            }
+                        }
+                    });
+                });
+            });
+
+            // Process and trigger local download
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            saveAs(blob, filename);
         }
 
-        function downloadExpiryLog() {
+        async function buildExcelDownload(rows, headers, filename) {
+            const mappedRows = rows.map(row => {
+                const newRow = {};
+                headers.forEach(header => {
+                    newRow[header] = getExportValue(row, header);
+                });
+                return newRow;
+            });
+            
+            const stateLabel = state.loading ? 'Processing Export...' : 'Data Export';
+            await createAndSaveStyledExcel([{ name: stateLabel, headers: headers, rows: mappedRows }], filename);
+        }
+
+        async function downloadExpiryLog() {
             const globallyFiltered = getGloballyFilteredData();
             const plus90 = new Date();
             plus90.setDate(plus90.getDate() + 90);
@@ -886,11 +974,11 @@
                 alert('No active expiry warning records tracked under the 90-day window to download.');
                 return;
             }
-            buildCsvDownload(expiryRows, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_expiry_warnings_under_90d.csv');
+            await buildExcelDownload(expiryRows, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_expiry_warnings_under_90d.xlsx');
         }
         window.downloadExpiryLog = downloadExpiryLog;
 
-        function downloadGroundExpiryLog() {
+        async function downloadGroundExpiryLog() {
             const globallyFiltered = getGloballyFilteredData();
             const plus15 = new Date();
             plus15.setDate(plus15.getDate() + 15);
@@ -902,19 +990,19 @@
                 alert('No active ground level expiry warning records tracked under the 15-day window to download.');
                 return;
             }
-            buildCsvDownload(groundExpiries, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_ground_level_expiries_under_15d.csv');
+            await buildExcelDownload(groundExpiries, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_ground_level_expiries_under_15d.xlsx');
         }
         window.downloadGroundExpiryLog = downloadGroundExpiryLog;
 
-        function exportFilteredGrid() {
+        async function exportFilteredGrid() {
             const filtered = getFilteredData();
             if (filtered.length === 0) return;
-            buildCsvDownload(filtered, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_filtered_grid_export.csv');
+            await buildExcelDownload(filtered, [...COLUMNS, 'Storage Type', 'Primary Action', 'All Validation Flags'], 'wms_filtered_grid_export.xlsx');
         }
         window.exportFilteredGrid = exportFilteredGrid;
 
         // ── EXPORT ALL ISSUES TO MULTI-SHEET EXCEL ────────────────────────────────────
-        function exportAllIssuesToExcel() {
+        async function exportAllIssuesToExcel() {
             const data = getGloballyFilteredData();
             const rowsWithIssues = data.filter(row => {
                 const issues = row._issues || [row._action];
@@ -925,7 +1013,6 @@
                 return;
             }
 
-            const wb = XLSX.utils.book_new();
             const groups = {};
             rowsWithIssues.forEach(row => {
                 (row._issues || [row._action]).forEach(issue => {
@@ -942,12 +1029,19 @@
                 });
             });
 
+            const sheetsData = [];
             const usedNames = new Set();
+            const headers = [...COLUMNS, 'Storage Type', 'Zone', 'Aisle', 'Level', 'Capacity', 'Primary Action', 'Validation Flag', 'All Validation Flags'];
+
             Object.entries(groups).forEach(([actionName, rows]) => {
-                const ws = XLSX.utils.json_to_sheet(rows);
-                XLSX.utils.book_append_sheet(wb, ws, getSafeSheetName(actionName, usedNames));
+                sheetsData.push({
+                    name: getSafeSheetName(actionName, usedNames),
+                    headers: headers,
+                    rows: rows
+                });
             });
-            XLSX.writeFile(wb, 'WMS_Issues_Report.xlsx');
+
+            await createAndSaveStyledExcel(sheetsData, 'WMS_Issues_Report.xlsx');
         }
         window.exportAllIssuesToExcel = exportAllIssuesToExcel;
 
@@ -1273,8 +1367,6 @@
                     (!hasSohColumn('PUOM QTY') && !hasSohColumn('CS QTY')) ||
                     (hasSohColumn('PUOM QTY') && puomQtyRaw === '') ||
                     (hasSohColumn('CS QTY') && csQtyRaw === '');
-                // Quantity integrity is based only on the primary on-hand quantity column.
-                // CS QTY may legitimately be zero for conversion / UOM scenarios and is not used here.
                 const hasZeroOrNegativeQty =
                     hasSohColumn('PUOM QTY') && puomQtyRaw !== '' && puomQty <= 0;
                 const hasStatusConflict = subinvUpper === 'SELLABLE' && (
@@ -2451,7 +2543,6 @@
             updateTableAndCharts();
         }
         window.toggleHeaderFilterVal = toggleHeaderFilterVal;
-
 
         function filterToIssue(actionName) {
             state.filters.headerFilters._action = [actionName];
